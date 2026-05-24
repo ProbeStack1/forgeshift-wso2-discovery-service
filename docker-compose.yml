@@ -1,0 +1,34 @@
+version: "3.9"
+
+# Local-development stack: MongoDB only. The discovery service stores every
+# discovered artifact as a Mongo document - no object storage layer.
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: forgeshift-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  discovery-service:
+    build: .
+    container_name: forgeshift-discovery
+    depends_on:
+      - mongo
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      MONGODB_URI: mongodb://mongo:27017/forgeshift_discovery
+      WSO2_BASE_URL: ${WSO2_BASE_URL:-https://host.docker.internal:9443}
+      WSO2_USERNAME: ${WSO2_USERNAME:-admin}
+      WSO2_PASSWORD: ${WSO2_PASSWORD:-admin}
+      WSO2_CLIENT_ID: ${WSO2_CLIENT_ID:-}
+      WSO2_CLIENT_SECRET: ${WSO2_CLIENT_SECRET:-}
+      WSO2_TRUST_SELF_SIGNED: "true"
+
+volumes:
+  mongo-data:

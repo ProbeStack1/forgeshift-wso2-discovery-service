@@ -1,0 +1,84 @@
+spring:
+  application:
+    name: forgeshift-wso2-discovery-service
+  # Load .env from the working directory as a property source. The
+  # "optional:" prefix means the app still boots if .env is absent (CI, prod).
+  # The "[.properties]" suffix tells Spring to parse the file as KEY=VALUE.
+  config:
+    import:
+      - optional:file:.env[.properties]
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb+srv://java-app:LszhHwotDeKBfG3a@probestack-nonprod.hdggqx.mongodb.net/probestack-wso2-forgeshift?appName=Probestack-nonprod}
+      database: ${MONGODB_DATABASE:probestack-wso2-forgeshift}
+      auto-index-creation: true
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      WRITE_DATES_AS_TIMESTAMPS: false
+
+server:
+  port: ${SERVER_PORT:8081}
+  servlet:
+    context-path: /discovery/v1
+  error:
+    include-message: always
+    include-binding-errors: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+
+logging:
+  level:
+    com.forgeshift: INFO
+    org.springframework.web: INFO
+    org.mongodb.driver: WARN
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+# --- Application properties ---
+forgeshift:
+  wso2:
+    base-url: ${WSO2_BASE_URL:https://34.133.77.23:9443}
+    username: ${WSO2_USERNAME:admin}
+    password: ${WSO2_PASSWORD:admin}
+    client-id: ${WSO2_CLIENT_ID:ZmLW27abbLLQtXgREb2qBpp3M8wa}
+    client-secret: ${WSO2_CLIENT_SECRET:by7XwGMhFGFBY3ZzArbf_MNVqx0a}
+    trust-self-signed: ${WSO2_TRUST_SELF_SIGNED:true}
+    publisher-api-base: /api/am/publisher/v4
+    admin-api-base: /api/am/admin/v4
+    devportal-api-base: /api/am/devportal/v3
+    token-path: /oauth2/token
+    publisher-scope: apim:api_view
+    admin-scope: apim:admin
+    devportal-scope: apim:subscribe
+    request-timeout-seconds: 30
+    page-size: 50
+  discovery:
+    collection-prefix: discovery_wso2_
+    revisions-collection: discovery_revisions
+    audit-collection: wso2_migration_audit_info
+    organizations-collection: wso2_organizations
+    profiles-collection: profiles
+    default-company-name: probestack
+    parallel-thread-pool-size: ${FORGESHIFT_DISCOVERY_PARALLEL_DOWNLOADS:4}
+    download-timeout-seconds: ${FORGESHIFT_DISCOVERY_DOWNLOAD_TIMEOUT_SECONDS:60}

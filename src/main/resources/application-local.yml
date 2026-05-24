@@ -1,0 +1,9 @@
+# Local-developer profile. Verbose logging, no real GCP credentials required.
+logging:
+  level:
+    com.forgeshift: DEBUG
+    org.springframework.web.reactive.function.client: DEBUG
+
+forgeshift:
+  wso2:
+    trust-self-signed: true
