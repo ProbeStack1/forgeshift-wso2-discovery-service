@@ -76,9 +76,10 @@ forgeshift:
   discovery:
     collection-prefix: discovery_wso2_
     revisions-collection: discovery_revisions
+    revision-map-collection: discovery_revision_map
     audit-collection: wso2_migration_audit_info
     organizations-collection: wso2_organizations
-    profiles-collection: profiles
+    profiles-collection: wso2_profiles
     default-company-name: probestack
     parallel-thread-pool-size: ${FORGESHIFT_DISCOVERY_PARALLEL_DOWNLOADS:4}
     download-timeout-seconds: ${FORGESHIFT_DISCOVERY_DOWNLOAD_TIMEOUT_SECONDS:60}

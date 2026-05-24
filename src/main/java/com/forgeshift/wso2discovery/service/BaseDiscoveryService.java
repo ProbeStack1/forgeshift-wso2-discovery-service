@@ -8,6 +8,7 @@ import com.forgeshift.wso2discovery.domain.ResourceType;
 import com.forgeshift.wso2discovery.dto.DiscoverResourceRequest;
 import com.forgeshift.wso2discovery.dto.DiscoverResourceResponse;
 import com.forgeshift.wso2discovery.repository.BaseDiscoveryRepository;
+import com.forgeshift.wso2discovery.util.PayloadCleaner;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
@@ -126,6 +127,9 @@ public abstract class BaseDiscoveryService {
             snap.setResourceType(resourceSlug);
             snap.setSnapshotAt(Instant.now());
             snap.setId(compositeId(req.getCompanyName(), req.getWso2Tenant(), resourceSlug, snap.getSourceId(), revision));
+            // Strip nulls/empty values from the raw WSO2 payload to keep snapshots
+            // small without losing any semantic information.
+            snap.setPayload(PayloadCleaner.strip(snap.getPayload()));
             repository.upsert(collection, snap);
             snapshots.add(snap);
             persistedIds.add(snap.getId());

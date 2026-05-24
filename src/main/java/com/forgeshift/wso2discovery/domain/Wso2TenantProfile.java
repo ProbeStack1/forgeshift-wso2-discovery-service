@@ -35,7 +35,7 @@ import java.time.Instant;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Document("profiles")
+@Document("wso2_profiles")
 public class Wso2TenantProfile {
 
     /** Composite id written by the profile-config service:

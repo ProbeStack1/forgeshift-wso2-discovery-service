@@ -18,6 +18,13 @@ public class DiscoveryProperties {
     /** Collection that holds the per-(tenant) revision counter. */
     private String revisionsCollection = "discovery_revisions";
 
+    /**
+     * Collection that maps (company|tenant|discoveryId) → revision, so the
+     * caller can issue multiple resource discoveries under one discovery run
+     * and have them all share the same revision (mirrors the Apigee pattern).
+     */
+    private String revisionMapCollection = "discovery_revision_map";
+
     /** Audit log collection. */
     private String auditCollection = "wso2_migration_audit_info";
 
@@ -25,7 +32,7 @@ public class DiscoveryProperties {
     private String organizationsCollection = "wso2_organizations";
 
     /** Per-tenant credential profiles collection (mirrors Apigee 'profiles'). */
-    private String profilesCollection = "profiles";
+    private String profilesCollection = "wso2_profiles";
 
     /** Business-metadata collection for POST /wso2/assetinfo. */
     private String assetInfoCollection = "probestack_wso2_asset_info";
