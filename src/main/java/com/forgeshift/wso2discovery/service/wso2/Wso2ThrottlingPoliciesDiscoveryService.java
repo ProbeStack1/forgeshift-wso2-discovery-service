@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 public class Wso2ThrottlingPoliciesDiscoveryService extends BaseDiscoveryService {
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.THROTTLING_POLICIES;
     }
 

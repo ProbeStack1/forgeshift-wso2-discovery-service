@@ -37,7 +37,7 @@ public class Wso2SubscriptionsDiscoveryService extends BaseDiscoveryService {
     }
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.SUBSCRIPTIONS;
     }
 

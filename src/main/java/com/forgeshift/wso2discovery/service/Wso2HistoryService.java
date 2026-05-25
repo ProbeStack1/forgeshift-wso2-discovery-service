@@ -4,11 +4,12 @@ import com.forgeshift.wso2discovery.config.DiscoveryProperties;
 import com.forgeshift.wso2discovery.domain.DiscoverySnapshot;
 import com.forgeshift.wso2discovery.domain.ResourceType;
 import com.forgeshift.wso2discovery.domain.RevisionCounter;
-import com.forgeshift.wso2discovery.dto.HistoryDetailsResponse;
+import com.forgeshift.wso2discovery.dto.DiscoverResourceResponse;
 import com.forgeshift.wso2discovery.dto.HistoryResponse;
 import com.forgeshift.wso2discovery.dto.HistoryRevisionsResponse;
 import com.forgeshift.wso2discovery.dto.HistorySnapshot;
 import com.forgeshift.wso2discovery.repository.RevisionCounterRepository;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
@@ -36,10 +37,11 @@ import java.util.TreeSet;
 /**
  * Read-only history of past discoveries.
  *
- * Backs three endpoints:
- *   GET /wso2/history             → list distinct (discoveryId, revision) pairs with per-resource counts
+ * Backs three endpoints (all mirror the Apigee discovery service's history surface):
+ *   GET /wso2/history             → list past discoveries with per-resource summary counts
  *   GET /wso2/history/revisions   → list revision numbers + the current counter
- *   GET /wso2/history/details     → fetch the raw DiscoverySnapshot rows for one (resourceType, discoveryId|revision)
+ *   GET /wso2/history/details     → typed detail payload for one (resourceType, discoveryId|revision),
+ *                                   in the same {@link DiscoverResourceResponse} shape the live POST returns
  *
  * Aggregates across every {@code discovery_wso2_<resource>} collection so the
  * caller does not have to know which collection holds which type.
@@ -52,6 +54,29 @@ public class Wso2HistoryService {
     private final MongoTemplate mongoTemplate;
     private final RevisionCounterRepository revisionCounterRepository;
     private final DiscoveryProperties discoveryProps;
+
+    /**
+     * Every concrete per-resource discovery service Spring finds (apis,
+     * applications, subscriptions, …). Used by {@link #details} to dispatch
+     * the snapshot-to-typed-detail conversion to the service that owns that
+     * resource type, so we get the same {@link DiscoverResourceResponse}
+     * shape the live {@code POST /wso2/<resource>} call produces.
+     */
+    private final List<BaseDiscoveryService> discoveryServices;
+
+    /** Registry built once at startup. {@code "apis" -> Wso2ApisDiscoveryService} etc. */
+    private Map<String, BaseDiscoveryService> servicesBySlug;
+
+    @PostConstruct
+    void buildServiceRegistry() {
+        Map<String, BaseDiscoveryService> map = new HashMap<>();
+        for (BaseDiscoveryService svc : discoveryServices) {
+            map.put(svc.getResourceType().getSlug(), svc);
+        }
+        this.servicesBySlug = map;
+        log.info("[history] Registered {} discovery services for /history/details: {}",
+                map.size(), map.keySet());
+    }
 
     /**
      * GET /wso2/history.
@@ -228,13 +253,30 @@ public class Wso2HistoryService {
     /**
      * GET /wso2/history/details.
      *
-     * Returns the full DiscoverySnapshot rows for one resource type, filtered
-     * by discoveryId and/or revision. Supplying neither returns everything for
-     * that resource type under (companyName, wso2Tenant), capped by limit.
+     * <p>Returns the typed detail payload for one resource type at a specific
+     * discovery, in the exact same shape produced by the live
+     * {@code POST /wso2/<resource>} endpoint — i.e. a
+     * {@link DiscoverResourceResponse} with the matching {@code <type>Details}
+     * list populated (apiDetails, applicationDetails, …).</p>
+     *
+     * <p>Mirrors the Apigee {@code /apigee/history/details} response so the UI
+     * can render the same table for either gateway. Reads stored snapshots
+     * from MongoDB and delegates the snapshot-to-typed-detail conversion to
+     * the discovery service that owns that resource type (so the projection
+     * stays in one place and history can never disagree with the live POST
+     * about field names or shapes).</p>
+     *
+     * @param companyName  required
+     * @param wso2Tenant   required
+     * @param resourceType required (slug like "apis", "applications")
+     * @param discoveryId  optional — when supplied, filters to one discovery run
+     * @param revision     optional — when supplied, filters to one revision
+     * @param limit        max snapshot rows to read (1..1000, default 100)
      */
-    public HistoryDetailsResponse details(String companyName, String wso2Tenant,
-                                          String resourceType, String discoveryId,
-                                          Integer revision, int limit) {
+    public DiscoverResourceResponse details(String companyName, String wso2Tenant,
+                                            String resourceType, String discoveryId,
+                                            Integer revision, int limit) {
+        long startNanos = System.nanoTime();
         if (!StringUtils.hasText(companyName) || !StringUtils.hasText(wso2Tenant)
                 || !StringUtils.hasText(resourceType)) {
             throw new IllegalArgumentException("companyName, wso2Tenant, and resourceType are required");
@@ -253,16 +295,16 @@ public class Wso2HistoryService {
                 DiscoverySnapshot.class,
                 collection);
 
-        return HistoryDetailsResponse.builder()
-                .companyName(companyName)
-                .wso2Tenant(wso2Tenant)
-                .resourceType(resourceType)
-                .discoveryId(discoveryId)
-                .revision(revision)
-                .collectionName(collection)
-                .items(items)
-                .totalCount(items.size())
-                .build();
+        BaseDiscoveryService svc = servicesBySlug.get(rt.getSlug());
+        if (svc == null) {
+            // Should be impossible — every ResourceType has a registered service —
+            // but if it ever happens, fail loudly rather than silently dropping details.
+            throw new IllegalStateException(
+                    "No discovery service registered for resourceType: " + rt.getSlug());
+        }
+
+        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        return svc.buildHistoryDetailsResponse(items, companyName, wso2Tenant, collection, elapsedMs);
     }
 
     // -------- helpers ---------------------------------------------------

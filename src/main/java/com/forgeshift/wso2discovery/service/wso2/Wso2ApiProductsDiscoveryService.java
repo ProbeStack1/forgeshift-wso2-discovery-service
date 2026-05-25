@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 public class Wso2ApiProductsDiscoveryService extends BaseDiscoveryService {
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.API_PRODUCTS;
     }
 

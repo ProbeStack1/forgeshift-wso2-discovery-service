@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 public class Wso2KeyManagersDiscoveryService extends BaseDiscoveryService {
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.KEY_MANAGERS;
     }
 

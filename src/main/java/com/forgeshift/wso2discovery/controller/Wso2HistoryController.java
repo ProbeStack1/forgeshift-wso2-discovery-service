@@ -1,7 +1,7 @@
 package com.forgeshift.wso2discovery.controller;
 
 import com.forgeshift.wso2discovery.config.DiscoveryProperties;
-import com.forgeshift.wso2discovery.dto.HistoryDetailsResponse;
+import com.forgeshift.wso2discovery.dto.DiscoverResourceResponse;
 import com.forgeshift.wso2discovery.dto.HistoryResponse;
 import com.forgeshift.wso2discovery.dto.HistoryRevisionsResponse;
 import com.forgeshift.wso2discovery.service.Wso2HistoryService;
@@ -55,7 +55,7 @@ public class Wso2HistoryController {
     }
 
     @GetMapping("/details")
-    public ResponseEntity<HistoryDetailsResponse> details(
+    public ResponseEntity<DiscoverResourceResponse> details(
             @RequestParam(required = false) String companyName,
             @RequestParam String wso2Tenant,
             @RequestParam String resourceType,

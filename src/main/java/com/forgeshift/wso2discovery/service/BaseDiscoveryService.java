@@ -51,7 +51,12 @@ public abstract class BaseDiscoveryService {
 
     // ---- subclass contract ----
 
-    protected abstract ResourceType getResourceType();
+    /**
+     * Which WSO2 resource type this service handles. Public so the history
+     * service can index every {@code BaseDiscoveryService} bean by slug and
+     * dispatch read-only details requests to the right one.
+     */
+    public abstract ResourceType getResourceType();
 
     /**
      * Call WSO2 and return the raw items. Each item is a Map representing one
@@ -159,6 +164,67 @@ public abstract class BaseDiscoveryService {
                 .build();
 
         // Subclass projects the right typed detail list onto the envelope.
+        populateDetails(response, snapshots);
+        return response;
+    }
+
+    /**
+     * Rebuild a {@link DiscoverResourceResponse} from previously stored
+     * snapshots — same shape as the live discovery path, just sourced from
+     * MongoDB instead of WSO2.
+     *
+     * <p>Used by {@code GET /wso2/history/details} so the UI gets the exact
+     * same typed payload shape (proxyDetails / apiDetails / …) it would have
+     * received from the original {@code POST /wso2/<resource>} response,
+     * without re-running the discovery against WSO2.</p>
+     *
+     * <p>Envelope fields come from the snapshots themselves: {@code revision},
+     * {@code requestTransactionId}, {@code timestamp} (most recent
+     * {@code snapshotAt}) and the resource-specific {@code environment} (read
+     * from snapshot metadata when present). The caller passes companyName /
+     * wso2Tenant / collectionName / elapsedMs because those are query-time
+     * concerns, not stored on the snapshots.</p>
+     */
+    public DiscoverResourceResponse buildHistoryDetailsResponse(
+            List<DiscoverySnapshot> snapshots,
+            String companyName,
+            String wso2Tenant,
+            String collectionName,
+            long elapsedMs) {
+
+        String resourceSlug = getResourceType().getSlug();
+        String discoveryId = null;
+        Integer revision = null;
+        Instant latest = null;
+        String environment = null;
+        List<String> snapshotIds = new ArrayList<>(snapshots.size());
+
+        for (DiscoverySnapshot s : snapshots) {
+            if (discoveryId == null) discoveryId = s.getDiscoveryId();
+            if (revision == null)    revision    = s.getRevision();
+            if (s.getSnapshotAt() != null && (latest == null || s.getSnapshotAt().isAfter(latest))) {
+                latest = s.getSnapshotAt();
+            }
+            if (environment == null && s.getMetadata() != null) {
+                environment = s.getMetadata().get("environment");
+            }
+            if (s.getId() != null) snapshotIds.add(s.getId());
+        }
+
+        DiscoverResourceResponse response = DiscoverResourceResponse.builder()
+                .companyName(companyName)
+                .wso2Tenant(wso2Tenant)
+                .environment(environment)
+                .resourceType(resourceSlug)
+                .totalCount(snapshots.size())
+                .discoveryId(discoveryId)
+                .revision(revision)
+                .timestamp(latest != null ? latest.toString() : null)
+                .collectionName(collectionName)
+                .snapshotIds(snapshotIds)
+                .elapsedMs(elapsedMs)
+                .build();
+
         populateDetails(response, snapshots);
         return response;
     }

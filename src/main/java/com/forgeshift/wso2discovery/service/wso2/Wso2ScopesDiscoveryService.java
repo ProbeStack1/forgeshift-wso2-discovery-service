@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 public class Wso2ScopesDiscoveryService extends BaseDiscoveryService {
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.SCOPES;
     }
 

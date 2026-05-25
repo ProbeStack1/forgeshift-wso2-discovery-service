@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
 public class Wso2UsersDiscoveryService extends BaseDiscoveryService {
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.USERS;
     }
 

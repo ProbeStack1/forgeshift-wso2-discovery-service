@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
 public class Wso2MediationPoliciesDiscoveryService extends BaseDiscoveryService {
 
     @Override
-    protected ResourceType getResourceType() {
+    public ResourceType getResourceType() {
         return ResourceType.MEDIATION_POLICIES;
     }
 
