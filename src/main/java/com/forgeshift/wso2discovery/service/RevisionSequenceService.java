@@ -14,6 +14,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Allocates monotonic revision numbers per (companyName, wso2Tenant).
@@ -23,6 +24,20 @@ import java.time.Instant;
  * revision. This is how a single "discovery run" can cover N resource types
  * (apis, applications, subscriptions, ...) as separate HTTP calls but have
  * them all stamped with the same revision — mirroring the Apigee pattern.
+ *
+ * <p>Concurrency model — copied verbatim from
+ * {@code MongoRevisionSequenceRepository} in the Apigee service:
+ * <ol>
+ *   <li>A per-scope (company|tenant) in-process lock serialises the
+ *       idempotency-check + counter-increment + mapping-insert sequence,
+ *       eliminating the race where two threads with the same
+ *       {@code discoveryId} both pass step 1 before either bumps the
+ *       counter (which would leak revision numbers and produce the
+ *       {@code +2}/{@code +5} jumps reported in the field).</li>
+ *   <li>The {@code DuplicateKeyException} catch on the mapping insert is
+ *       retained as a cross-JVM safety net — the in-process lock only
+ *       protects calls hitting the same replica.</li>
+ * </ol>
  *
  * <p>Persistence layout:
  * <ul>
@@ -43,80 +58,109 @@ public class RevisionSequenceService {
     private final DiscoveryProperties props;
 
     /**
+     * Per-scope locks to prevent in-process races between the idempotency
+     * check and the counter increment. Keyed by {@code company|tenant}
+     * (the same scope the counter document is keyed by), so two concurrent
+     * allocations for different scopes don't serialise unnecessarily.
+     */
+    private final ConcurrentHashMap<String, Object> allocationLocks = new ConcurrentHashMap<>();
+
+    /**
      * Returns the revision number for this (companyName, wso2Tenant,
      * discoveryId). Allocates a new one on first call; returns the cached
      * one on every subsequent call with the same triple.
      */
     public int nextRevision(String companyName, String wso2Tenant, String discoveryId, String userEmail) {
-        String sequenceId = sequenceId(companyName, wso2Tenant, discoveryId);
-        String mapColl = props.getRevisionMapCollection();
+        // ------------------------------------------------------
+        // STEP 0 — normalise inputs and build document keys
+        // ------------------------------------------------------
+        String company = normalise(companyName, "_default_");
+        String tenant  = normalise(wso2Tenant, "_default_");
+        String txId    = normalise(discoveryId, "_default_");
+        String email   = userEmail != null ? userEmail : "";
 
-        // Step 1 — idempotent lookup. If this discoveryId already has a
-        // revision, return it. This is the hot path for every call after the
-        // first in a multi-resource discovery run.
-        Document existing = mongoTemplate.findOne(
-                Query.query(Criteria.where("_id").is(sequenceId)),
-                Document.class,
-                mapColl);
-        if (existing != null) {
-            Integer rev = existing.getInteger("revision");
-            if (rev != null) {
-                log.debug("Reusing revision {} for company={} tenant={} discoveryId={}",
-                        rev, companyName, wso2Tenant, discoveryId);
-                return rev;
-            }
-        }
+        String sequenceId  = String.join("|", company, tenant, txId);
+        String scopeKey    = String.join("|", company, tenant);
+        String mapColl     = props.getRevisionMapCollection();
 
-        // Step 2 — atomically bump the per-tenant counter to claim a new
-        // revision number. Concurrent calls always get distinct values here.
-        Query counterQ = Query.query(Criteria.where("companyName").is(companyName)
-                .and("wso2Tenant").is(wso2Tenant));
-        Update counterU = new Update()
-                .inc("current", 1)
-                .set("lastDiscoveryId", discoveryId)
-                .set("lastUserEmail", userEmail)
-                .set("updatedAt", Instant.now())
-                .setOnInsert("companyName", companyName)
-                .setOnInsert("wso2Tenant", wso2Tenant);
-        RevisionCounter updated = mongoTemplate.findAndModify(
-                counterQ,
-                counterU,
-                FindAndModifyOptions.options().returnNew(true).upsert(true),
-                RevisionCounter.class,
-                props.getRevisionsCollection());
-        int newRev = updated != null ? updated.getCurrent() : 1;
+        Object lock = allocationLocks.computeIfAbsent(scopeKey, k -> new Object());
+        synchronized (lock) {
 
-        // Step 3 — record the mapping. If two threads/replicas both got here
-        // for the same discoveryId, the second insert fails with a duplicate
-        // _id; we re-read the winner's revision and return that. We accept
-        // the cost of one wasted revision number in that race — gaps in the
-        // sequence are fine for history.
-        try {
-            Document map = new Document()
-                    .append("_id", sequenceId)
-                    .append("companyName", companyName)
-                    .append("wso2Tenant", wso2Tenant)
-                    .append("discoveryId", discoveryId)
-                    .append("revision", newRev)
-                    .append("userEmail", userEmail)
-                    .append("createdAt", Instant.now());
-            mongoTemplate.insert(map, mapColl);
-            log.debug("Allocated revision {} for company={} tenant={} discoveryId={}",
-                    newRev, companyName, wso2Tenant, discoveryId);
-            return newRev;
-        } catch (DuplicateKeyException race) {
-            Document winner = mongoTemplate.findOne(
+            // ------------------------------------------------------
+            // STEP 1 — idempotent lookup. If this discoveryId already has a
+            // revision, return it. This is the hot path for every call after
+            // the first in a multi-resource discovery run.
+            // ------------------------------------------------------
+            Document existing = mongoTemplate.findOne(
                     Query.query(Criteria.where("_id").is(sequenceId)),
                     Document.class,
                     mapColl);
-            Integer winnerRev = winner != null ? winner.getInteger("revision") : null;
-            log.warn("Concurrent allocation for discoveryId={} — wasted revision {}, using {}",
-                    discoveryId, newRev, winnerRev);
-            return winnerRev != null ? winnerRev : newRev;
+            if (existing != null) {
+                Integer rev = existing.getInteger("revision");
+                if (rev != null) {
+                    log.debug("Reusing revision {} for company={} tenant={} discoveryId={}",
+                            rev, company, tenant, txId);
+                    return rev;
+                }
+            }
+
+            // ------------------------------------------------------
+            // STEP 2 — atomically bump the per-tenant counter to claim a new
+            // revision number. Concurrent calls always get distinct values
+            // here, but the surrounding lock ensures only one allocation per
+            // scope is in flight on this replica.
+            // ------------------------------------------------------
+            Query counterQ = Query.query(Criteria.where("companyName").is(company)
+                    .and("wso2Tenant").is(tenant));
+            Update counterU = new Update()
+                    .inc("current", 1)
+                    .set("lastDiscoveryId", txId)
+                    .set("lastUserEmail", email)
+                    .set("updatedAt", Instant.now())
+                    .setOnInsert("companyName", company)
+                    .setOnInsert("wso2Tenant", tenant);
+            RevisionCounter updated = mongoTemplate.findAndModify(
+                    counterQ,
+                    counterU,
+                    FindAndModifyOptions.options().returnNew(true).upsert(true),
+                    RevisionCounter.class,
+                    props.getRevisionsCollection());
+            int newRev = updated != null ? updated.getCurrent() : 1;
+
+            // ------------------------------------------------------
+            // STEP 3 — record the mapping. The in-process lock means a same-
+            // JVM caller can't race here; the DuplicateKeyException catch
+            // handles cross-JVM races on the same discoveryId. We accept the
+            // cost of one wasted revision number in the cross-JVM race —
+            // gaps in the sequence are fine for history.
+            // ------------------------------------------------------
+            try {
+                Document map = new Document()
+                        .append("_id", sequenceId)
+                        .append("companyName", company)
+                        .append("wso2Tenant", tenant)
+                        .append("discoveryId", txId)
+                        .append("revision", newRev)
+                        .append("userEmail", email)
+                        .append("createdAt", Instant.now());
+                mongoTemplate.insert(map, mapColl);
+                log.info("Allocated revision {} for company={} tenant={} discoveryId={}",
+                        newRev, company, tenant, txId);
+                return newRev;
+            } catch (DuplicateKeyException race) {
+                Document winner = mongoTemplate.findOne(
+                        Query.query(Criteria.where("_id").is(sequenceId)),
+                        Document.class,
+                        mapColl);
+                Integer winnerRev = winner != null ? winner.getInteger("revision") : null;
+                log.warn("Cross-JVM concurrent allocation for discoveryId={} — wasted revision {}, using {}",
+                        txId, newRev, winnerRev);
+                return winnerRev != null ? winnerRev : newRev;
+            }
         }
     }
 
-    private static String sequenceId(String companyName, String wso2Tenant, String discoveryId) {
-        return companyName + "|" + wso2Tenant + "|" + discoveryId;
+    private static String normalise(String value, String fallback) {
+        return (value != null && !value.trim().isEmpty()) ? value.trim() : fallback;
     }
 }
