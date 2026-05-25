@@ -8,25 +8,27 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
- * Per-tenant WSO2 connection profile stored in the {@code profiles}
- * collection (configurable via {@code forgeshift.discovery.profiles-collection}).
+ * Per-(companyName, profileName) WSO2 connection profile stored in the
+ * {@code wso2_profiles} collection.
  *
  * <p><b>Schema-shared with the profile-config service.</b> The profile-config
  * service is the writer / schema owner. This service is a reader only. We
  * intentionally do NOT declare a {@code @CompoundIndex} here because:
  * <ul>
  *   <li>The profile-config service owns the uniqueness constraint
- *       {@code (companyName, wso2Tenant, profileName)}.</li>
+ *       {@code (companyName, profileName)}.</li>
  *   <li>If both services tried to create competing indexes on boot, MongoDB
  *       would reject the second one with an "Index already exists with a
  *       different name" error.</li>
  * </ul>
  *
- * <p>When multiple profile documents exist for the same tenant, the token
- * service picks the one with {@code status == ACTIVE} that has the most
- * recent {@code updatedAt}.
+ * <p>The profile binds to multiple tenants via {@link #tenants}. The token
+ * service finds creds for a given tenant by matching it against that array
+ * (Mongo treats array equality as "contains"). When multiple ACTIVE profiles
+ * own the same tenant, the resolver picks the most recently updated.
  *
  * <p><b>Secrets:</b> stored in plain text for the MVP. Masked on read in all
  * REST responses. TODO: encrypt at rest.
@@ -39,15 +41,22 @@ import java.time.Instant;
 public class Wso2TenantProfile {
 
     /** Composite id written by the profile-config service:
-     *  {@code <companyName>|<wso2Tenant>|<profileName>}. */
+     *  {@code <companyName>|<profileName>}. */
     @Id
     private String id;
 
     private String companyName;
-    private String wso2Tenant;
 
     /** Name of the profile, e.g. "primary" / "readonly". */
     private String profileName;
+
+    /**
+     * Tenants this profile manages. Always contains at least
+     * {@code carbon.super}; additional entries come from the WSO2 tenants
+     * API at create time. The resolver matches a requested tenant against
+     * this list.
+     */
+    private List<String> tenants;
 
     /** WSO2 base URL for this tenant, e.g. https://wso2.example.com:9443. */
     private String wso2BaseUrl;
@@ -58,7 +67,7 @@ public class Wso2TenantProfile {
     /** WSO2 admin password. */
     private String password;
 
-    /** OAuth2 client_id registered against this WSO2 tenant. */
+    /** OAuth2 client_id registered against this WSO2 instance. */
     private String clientId;
 
     /** OAuth2 client_secret. */

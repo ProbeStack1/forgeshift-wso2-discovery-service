@@ -20,12 +20,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * CRUD for the multi-tenancy {@code profiles} collection.
+ * CRUD for the multi-tenancy {@code wso2_profiles} collection.
  *
- *   POST   /profiles                                 — create / update
- *   GET    /profiles                                 — list (paged, optional companyName filter)
- *   GET    /profiles/{companyName}/{wso2Tenant}      — read one
- *   DELETE /profiles/{companyName}/{wso2Tenant}      — delete
+ *   POST   /profiles                                  — create / update
+ *   GET    /profiles                                  — list (paged, optional companyName filter)
+ *   GET    /profiles/{companyName}/{profileName}      — read one
+ *   DELETE /profiles/{companyName}/{profileName}      — delete
  *
  * Secrets (password, clientSecret) are masked on every read.
  */
@@ -39,7 +39,8 @@ public class Wso2ProfilesController {
 
     @PostMapping
     public ResponseEntity<Wso2TenantProfileDto> upsert(@Valid @RequestBody Wso2TenantProfileDto body) {
-        log.info("POST /profiles company={} tenant={}", body.getCompanyName(), body.getWso2Tenant());
+        log.info("POST /profiles company={} profile={} tenants={}",
+                body.getCompanyName(), body.getProfileName(), body.getTenants());
         Wso2TenantProfile saved = service.save(body.toDomain());
         return ResponseEntity.ok(Wso2TenantProfileDto.fromMasked(saved));
     }
@@ -56,19 +57,19 @@ public class Wso2ProfilesController {
         return rows.map(Wso2TenantProfileDto::fromMasked);
     }
 
-    @GetMapping("/{companyName}/{wso2Tenant}")
+    @GetMapping("/{companyName}/{profileName}")
     public ResponseEntity<Wso2TenantProfileDto> get(@PathVariable String companyName,
-                                                    @PathVariable String wso2Tenant) {
-        return service.get(companyName, wso2Tenant)
+                                                    @PathVariable String profileName) {
+        return service.get(companyName, profileName)
                 .map(Wso2TenantProfileDto::fromMasked)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    @DeleteMapping("/{companyName}/{wso2Tenant}")
+    @DeleteMapping("/{companyName}/{profileName}")
     public ResponseEntity<Void> delete(@PathVariable String companyName,
-                                       @PathVariable String wso2Tenant) {
-        service.delete(companyName, wso2Tenant);
+                                       @PathVariable String profileName) {
+        service.delete(companyName, profileName);
         return ResponseEntity.noContent().build();
     }
 }

@@ -10,21 +10,16 @@ import java.util.Optional;
 
 public interface Wso2TenantProfileRepository extends MongoRepository<Wso2TenantProfile, String> {
 
-    /**
-     * Legacy single-profile lookup. Returns whichever document Mongo finds first
-     * when only one profile per (companyName, wso2Tenant) exists. For the
-     * multi-profile shape introduced by the profile-config service, prefer
-     * {@link #findByCompanyNameAndWso2TenantOrderByUpdatedAtDesc} and filter
-     * by status in the caller (token service).
-     */
-    Optional<Wso2TenantProfile> findByCompanyNameAndWso2Tenant(String companyName, String wso2Tenant);
+    Optional<Wso2TenantProfile> findByCompanyNameAndProfileName(String companyName, String profileName);
 
     /**
-     * All profiles for a tenant, most recently updated first. The token service
-     * filters this list by status==ACTIVE (treating null/missing status as
-     * ACTIVE for back-compat) and takes the first hit.
+     * All profiles for {@code companyName} whose {@code tenants} array
+     * contains {@code wso2Tenant}, most recently updated first. The token
+     * service filters this list by status==ACTIVE (treating null/missing
+     * status as ACTIVE for back-compat) and takes the first hit.
      */
-    List<Wso2TenantProfile> findByCompanyNameAndWso2TenantOrderByUpdatedAtDesc(String companyName, String wso2Tenant);
+    List<Wso2TenantProfile> findByCompanyNameAndTenantsOrderByUpdatedAtDesc(
+            String companyName, String wso2Tenant);
 
     Page<Wso2TenantProfile> findByCompanyName(String companyName, Pageable pageable);
 }

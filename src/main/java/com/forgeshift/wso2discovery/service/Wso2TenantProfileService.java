@@ -13,12 +13,15 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * Looks up per-tenant connection credentials in the {@code profiles}
+ * Looks up per-tenant connection credentials in the {@code wso2_profiles}
  * collection and falls back to the static {@code Wso2Properties} when no
  * profile exists.
  *
- * Enables multi-tenant discovery: one service instance handles many WSO2
- * tenants with different OAuth clients without changing app config.
+ * <p>Profiles are stored one-per-(companyName, profileName) with a
+ * {@code tenants} array listing every WSO2 tenant they manage. The resolver
+ * finds the right credentials by matching the requested tenant against that
+ * array — Mongo's array-equality semantics treat
+ * {@code findByCompanyNameAndTenants(c, t)} as "contains t".
  */
 @Slf4j
 @Service
@@ -32,18 +35,16 @@ public class Wso2TenantProfileService {
      * Resolve credentials for ({@code companyName}, {@code wso2Tenant}).
      *
      * Lookup precedence:
-     *   1. Profile row in {@code profiles} collection
-     *   2. Static {@code forgeshift.wso2.*} (the single-tenant fallback)
+     *   1. Profile row in {@code wso2_profiles} whose {@code tenants} list
+     *      contains {@code wso2Tenant}, status ACTIVE, most recent update.
+     *   2. Static {@code forgeshift.wso2.*} (the single-tenant fallback).
      *
      * When either input is blank, falls straight through to the static path.
      */
     public Wso2Credentials resolve(String companyName, String wso2Tenant) {
         if (StringUtils.hasText(companyName) && StringUtils.hasText(wso2Tenant)) {
-            // Multi-profile shape (config service writes named profiles):
-            // pick the most-recently-updated ACTIVE one. Older docs with no
-            // status field are treated as ACTIVE for back-compat.
             java.util.List<Wso2TenantProfile> all =
-                    repository.findByCompanyNameAndWso2TenantOrderByUpdatedAtDesc(companyName, wso2Tenant);
+                    repository.findByCompanyNameAndTenantsOrderByUpdatedAtDesc(companyName, wso2Tenant);
             Wso2TenantProfile chosen = all.stream()
                     .filter(p -> p.getStatus() == null
                             || "ACTIVE".equalsIgnoreCase(p.getStatus()))
@@ -80,7 +81,7 @@ public class Wso2TenantProfileService {
     public Wso2TenantProfile save(Wso2TenantProfile p) {
         Instant now = Instant.now();
         if (p.getId() == null || p.getId().isBlank()) {
-            p.setId(p.getCompanyName() + "|" + p.getWso2Tenant());
+            p.setId(p.getCompanyName() + "|" + p.getProfileName());
         }
         if (repository.existsById(p.getId())) {
             p.setUpdatedAt(now);
@@ -91,12 +92,12 @@ public class Wso2TenantProfileService {
         return repository.save(p);
     }
 
-    public Optional<Wso2TenantProfile> get(String companyName, String wso2Tenant) {
-        return repository.findByCompanyNameAndWso2Tenant(companyName, wso2Tenant);
+    public Optional<Wso2TenantProfile> get(String companyName, String profileName) {
+        return repository.findByCompanyNameAndProfileName(companyName, profileName);
     }
 
-    public void delete(String companyName, String wso2Tenant) {
-        repository.findByCompanyNameAndWso2Tenant(companyName, wso2Tenant)
+    public void delete(String companyName, String profileName) {
+        repository.findByCompanyNameAndProfileName(companyName, profileName)
                 .ifPresent(p -> repository.deleteById(p.getId()));
     }
 

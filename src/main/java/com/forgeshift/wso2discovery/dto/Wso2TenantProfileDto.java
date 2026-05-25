@@ -10,6 +10,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Public-facing profile shape. Used for both reads (with secrets masked) and
@@ -23,7 +24,7 @@ import java.time.Instant;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class Wso2TenantProfileDto {
 
-    @Schema(description = "Composite id: {companyName}|{wso2Tenant}. Server-derived; ignored on POST.")
+    @Schema(description = "Composite id: {companyName}|{profileName}. Server-derived; ignored on POST.")
     private String id;
 
     @NotBlank
@@ -31,8 +32,12 @@ public class Wso2TenantProfileDto {
     private String companyName;
 
     @NotBlank
-    @Schema(description = "WSO2 tenant", example = "carbon.super")
-    private String wso2Tenant;
+    @Schema(description = "Profile name (unique per company)", example = "primary")
+    private String profileName;
+
+    @Schema(description = "Tenants this profile manages",
+            example = "[\"carbon.super\", \"bank.local\"]")
+    private List<String> tenants;
 
     @NotBlank
     @Schema(description = "WSO2 base URL", example = "https://wso2.example.com:9443")
@@ -46,7 +51,7 @@ public class Wso2TenantProfileDto {
     private String password;
 
     @NotBlank
-    @Schema(description = "OAuth2 client_id registered against this WSO2 tenant")
+    @Schema(description = "OAuth2 client_id registered against this WSO2 instance")
     private String clientId;
 
     @Schema(description = "OAuth2 client_secret. Required on write, masked on read.")
@@ -66,7 +71,8 @@ public class Wso2TenantProfileDto {
         return Wso2TenantProfileDto.builder()
                 .id(p.getId())
                 .companyName(p.getCompanyName())
-                .wso2Tenant(p.getWso2Tenant())
+                .profileName(p.getProfileName())
+                .tenants(p.getTenants())
                 .wso2BaseUrl(p.getWso2BaseUrl())
                 .username(p.getUsername())
                 .password(mask(p.getPassword()))
@@ -83,7 +89,8 @@ public class Wso2TenantProfileDto {
     public Wso2TenantProfile toDomain() {
         return Wso2TenantProfile.builder()
                 .companyName(companyName)
-                .wso2Tenant(wso2Tenant)
+                .profileName(profileName)
+                .tenants(tenants)
                 .wso2BaseUrl(wso2BaseUrl)
                 .username(username)
                 .password(password)
