@@ -220,6 +220,53 @@ public class Wso2Client {
     // the failure.
     // =====================================================================
 
+    /** Same as listPaginated but with an extra static query parameter (e.g. applicationId=X). */
+    private List<Map<String, Object>> listPaginatedWithQuery(String accessToken, String path, String extraKey, String extraValue) {
+        Objects.requireNonNull(accessToken, "accessToken");
+        int pageSize = props.getPageSize();
+        int offset = 0;
+        java.util.List<Map<String, Object>> all = new java.util.ArrayList<>();
+
+        while (true) {
+            final int currentOffset = offset;
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> page = wso2WebClient.get()
+                        .uri(uri -> uri.path(path)
+                                .queryParam(extraKey, extraValue)
+                                .queryParam("limit", pageSize)
+                                .queryParam("offset", currentOffset)
+                                .build())
+                        .header("Authorization", "Bearer " + accessToken)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .timeout(Duration.ofSeconds(props.getRequestTimeoutSeconds()))
+                        .block();
+
+                if (page == null) break;
+                @SuppressWarnings("unchecked")
+                java.util.List<Map<String, Object>> list = (java.util.List<Map<String, Object>>) page.get("list");
+                if (list == null || list.isEmpty()) break;
+                all.addAll(list);
+                if (list.size() < pageSize) break;
+                offset += list.size();
+                if (offset > 100_000) {
+                    log.warn("listPaginatedWithQuery({}) exceeded 100k items, stopping pagination.", path);
+                    break;
+                }
+            } catch (WebClientResponseException e) {
+                log.warn("WSO2 list call to {}?{}={} failed: status={} body={}",
+                        path, extraKey, extraValue, e.getStatusCode(), e.getResponseBodyAsString());
+                return all;
+            } catch (Exception e) {
+                log.warn("WSO2 list call to {}?{}={} failed: {}", path, extraKey, extraValue, e.getMessage());
+                return all;
+            }
+        }
+        return all;
+    }
+
     /** Pages through a list endpoint that follows WSO2's standard {list, count, pagination} shape. */
     private List<Map<String, Object>> listPaginated(String accessToken, String path) {
         Objects.requireNonNull(accessToken, "accessToken");
@@ -272,9 +319,29 @@ public class Wso2Client {
         return listPaginated(accessToken, props.getDevportalApiBase() + "/applications");
     }
 
-    /** GET /api/am/devportal/v3/subscriptions  (requires devportal scope). */
+    /**
+     * GET /api/am/devportal/v3/subscriptions  (requires devportal scope).
+     *
+     * WSO2 4.x requires either {@code applicationId} or {@code apiId} as a query
+     * parameter — calling without one returns 400 "Either applicationId or apiId
+     * should be available". Callers that want all subscriptions in the tenant
+     * should iterate applications and aggregate via
+     * {@link #listSubscriptionsForApplication(String, String)}.
+     */
     public List<Map<String, Object>> listSubscriptions(String accessToken) {
         return listPaginated(accessToken, props.getDevportalApiBase() + "/subscriptions");
+    }
+
+    /**
+     * GET /api/am/devportal/v3/subscriptions?applicationId={appId}.
+     *
+     * The only reliable way to list all subscriptions on WSO2 4.x — iterate
+     * applications and call this per-app.
+     */
+    public List<Map<String, Object>> listSubscriptionsForApplication(String accessToken, String applicationId) {
+        return listPaginatedWithQuery(accessToken,
+                props.getDevportalApiBase() + "/subscriptions",
+                "applicationId", applicationId);
     }
 
     /** GET /api/am/publisher/v4/api-products  (requires publisher scope). */

@@ -48,10 +48,26 @@ public class Wso2SubscriptionsDiscoveryService extends BaseDiscoveryService {
 
     @Override
     protected List<Map<String, Object>> fetchFromWso2(String accessToken, DiscoverResourceRequest req) {
-        List<Map<String, Object>> subs = wso2Client.listSubscriptions(accessToken);
-        log.info("[subscriptions] DevPortal returned {} subscriptions (company={} tenant={})",
-                subs.size(), req.getCompanyName(), req.getWso2Tenant());
-        return subs;
+        // WSO2 4.x DevPortal /subscriptions requires applicationId OR apiId as a
+        // query param — calling without one returns 400. So iterate applications
+        // and aggregate. Same pattern as Wso2MediationPoliciesDiscoveryService.
+        List<Map<String, Object>> apps = wso2Client.listApplications(accessToken);
+        log.info("[subscriptions] iterating {} applications for per-app subscriptions (company={} tenant={})",
+                apps.size(), req.getCompanyName(), req.getWso2Tenant());
+
+        List<Map<String, Object>> all = new java.util.ArrayList<>();
+        for (Map<String, Object> app : apps) {
+            String appId = str(app.get("applicationId"));
+            if (appId == null) continue;
+            try {
+                List<Map<String, Object>> subs = wso2Client.listSubscriptionsForApplication(accessToken, appId);
+                all.addAll(subs);
+            } catch (Exception e) {
+                log.warn("[subscriptions] failed for app {} ({}): {}", app.get("name"), appId, e.getMessage());
+            }
+        }
+        log.info("[subscriptions] aggregated {} subscriptions across {} applications", all.size(), apps.size());
+        return all;
     }
 
     @Override
