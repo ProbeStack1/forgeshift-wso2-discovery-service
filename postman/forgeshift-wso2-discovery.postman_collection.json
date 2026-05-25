@@ -11,10 +11,22 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "// Mint an Apigee-style requestTransactionId for every request so",
-          "// discovery POSTs satisfy the now-required field without the user",
-          "// having to type one. Format mirrors the Apigee historyId:",
+          "// Mint an Apigee-style requestTransactionId IF NONE IS SET, otherwise",
+          "// reuse the existing one — so every per-resource POST in a single",
+          "// 'discovery run' shares the same discoveryId and therefore the same",
+          "// revision number. The backend's RevisionSequenceService is",
+          "// idempotent on discoveryId; minting a fresh id per request would",
+          "// allocate a new revision per request and bump the counter by N.",
+          "// To start a new run, hit the '\\u270f\\ufe0f Start new discovery run'",
+          "// request (or clear the requestTransactionId collection variable).",
+          "//",
+          "// Format mirrors the Apigee historyId:",
           "//   <4-char-prefix>_<companyName>_<wso2Tenant>_<yyyyMMddHHmmssSSS>",
+          "const existing = pm.collectionVariables.get('requestTransactionId');",
+          "if (existing && existing.trim() !== '') {",
+          "    // Reuse — same discovery run, same id, same revision.",
+          "    return;",
+          "}",
           "const company = pm.collectionVariables.get('companyName') || 'probestack';",
           "const tenant  = pm.collectionVariables.get('wso2Tenant')  || 'carbon.super';",
           "const prefix = Array.from({ length: 4 }, () =>",
@@ -32,7 +44,8 @@
           "    pad(d.getUTCSeconds()) +",
           "    padMs(d.getUTCMilliseconds());",
           "const txn = `${prefix}_${company}_${tenant}_${ts}`;",
-          "pm.collectionVariables.set('requestTransactionId', txn);"
+          "pm.collectionVariables.set('requestTransactionId', txn);",
+          "console.log('[prerequest] Minted new requestTransactionId =', txn);"
         ]
       }
     }
@@ -50,6 +63,47 @@
     { "key": "requestTransactionId", "value": "", "type": "string" }
   ],
   "item": [
+    {
+      "name": "Start new discovery run (reset transaction id)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Clear discovery-run state so the next discovery POST mints a",
+              "// fresh requestTransactionId (and the backend allocates a new",
+              "// revision). Until this is hit again, every per-resource POST",
+              "// reuses the same requestTransactionId and lands on the same",
+              "// revision — matching the Apigee 'one discovery run = one revision'",
+              "// contract.",
+              "pm.collectionVariables.set('requestTransactionId', '');",
+              "pm.collectionVariables.set('discoveryId', '');",
+              "pm.collectionVariables.set('jobId', '');",
+              "pm.collectionVariables.set('revision', '');",
+              "console.log('[reset] Cleared requestTransactionId, discoveryId, jobId, revision');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('reset OK', () => pm.expect(pm.collectionVariables.get('requestTransactionId')).to.eql(''));",
+              "console.log('Next discovery POST will mint a fresh requestTransactionId and allocate a new revision.');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/actuator/info", "host": ["{{baseUrl}}"], "path": ["actuator", "info"] },
+        "description": "One-click reset. Clears the auto-minted requestTransactionId (and discoveryId / jobId / revision) collection variables so the next per-resource POST starts a fresh discovery run with a brand-new revision. The HTTP call itself is harmless — just hits /actuator/info to give Postman something to send.\n\nRun this whenever you want to start a new discovery run. Until you do, every POST /wso2/* in the collection reuses the same requestTransactionId so all snapshots land on the same revision — same contract as the Apigee discovery service."
+      },
+      "response": []
+    },
     {
       "name": "Health & Metadata",
       "item": [
