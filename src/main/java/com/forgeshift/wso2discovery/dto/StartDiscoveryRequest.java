@@ -19,6 +19,14 @@ public class StartDiscoveryRequest {
     @NotBlank
     private String wso2Tenant;
 
+    /**
+     * Caller-supplied discovery transaction id. Required — the backend will
+     * not generate one. Every per-resource fan-out under this bulk job
+     * propagates this id onto its snapshots.
+     */
+    @NotBlank
+    private String requestTransactionId;
+
     private String environment;
 
     private String userEmail;

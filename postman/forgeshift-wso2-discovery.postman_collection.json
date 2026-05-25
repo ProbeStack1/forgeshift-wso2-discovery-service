@@ -2,9 +2,41 @@
   "info": {
     "_postman_id": "f0c1e2d3-4b5a-6c7d-8e9f-0a1b2c3d4e5f",
     "name": "Forgeshift WSO2 Discovery Service",
-    "description": "Every REST endpoint exposed by the forgeshift-wso2-discovery-service. The per-resource POSTs run a synchronous discovery for one WSO2 resource type and write a snapshot to MongoDB. The /discoveries endpoints orchestrate a bulk fan-out job. Only POST /wso2/apis is fully implemented; the rest are reserved templates that already accept the same request body once their service backend lands.\n\nDefault environment targets http://localhost:8081/discovery/v1. Switch via the `baseUrl` collection variable or attach a Postman environment.\n\nCollection variables:\n- baseUrl        Base URL including the context path (default: http://localhost:8081/discovery/v1)\n- companyName    Multi-tenancy partner id (default: probestack)\n- wso2Tenant     WSO2 tenant to discover (default: carbon.super)\n- userEmail      Audit field, free-form (default: ops@local)\n- jobId          Captured from POST /discoveries response\n- discoveryId    Captured from POST /wso2/apis response (requestTransactionId)",
+    "description": "Every REST endpoint exposed by the forgeshift-wso2-discovery-service. The per-resource POSTs run a synchronous discovery for one WSO2 resource type and write a snapshot to MongoDB. The /discoveries endpoints orchestrate a bulk fan-out job. Only POST /wso2/apis is fully implemented; the rest are reserved templates that already accept the same request body once their service backend lands.\n\nDefault environment targets http://localhost:8081/discovery/v1. Switch via the `baseUrl` collection variable or attach a Postman environment.\n\nCollection variables:\n- baseUrl                Base URL including the context path (default: http://localhost:8081/discovery/v1)\n- companyName            Multi-tenancy partner id (default: probestack)\n- wso2Tenant             WSO2 tenant to discover (default: carbon.super)\n- userEmail              Audit field, free-form (default: ops@local)\n- jobId                  Captured from POST /discoveries response\n- discoveryId            Captured from POST /wso2/* response (= requestTransactionId of the most recent discovery)\n- requestTransactionId   Auto-generated Apigee-style id by the collection pre-request script before every request. Format: <4-char-prefix>_<companyName>_<wso2Tenant>_<yyyyMMddHHmmssSSS>. Backend requires this on every discovery POST.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Mint an Apigee-style requestTransactionId for every request so",
+          "// discovery POSTs satisfy the now-required field without the user",
+          "// having to type one. Format mirrors the Apigee historyId:",
+          "//   <4-char-prefix>_<companyName>_<wso2Tenant>_<yyyyMMddHHmmssSSS>",
+          "const company = pm.collectionVariables.get('companyName') || 'probestack';",
+          "const tenant  = pm.collectionVariables.get('wso2Tenant')  || 'carbon.super';",
+          "const prefix = Array.from({ length: 4 }, () =>",
+          "    String.fromCharCode(65 + Math.floor(Math.random() * 26))",
+          ").join('');",
+          "const d = new Date();",
+          "const pad   = n => String(n).padStart(2, '0');",
+          "const padMs = n => String(n).padStart(3, '0');",
+          "const ts =",
+          "    d.getUTCFullYear() +",
+          "    pad(d.getUTCMonth() + 1) +",
+          "    pad(d.getUTCDate()) +",
+          "    pad(d.getUTCHours()) +",
+          "    pad(d.getUTCMinutes()) +",
+          "    pad(d.getUTCSeconds()) +",
+          "    padMs(d.getUTCMilliseconds());",
+          "const txn = `${prefix}_${company}_${tenant}_${ts}`;",
+          "pm.collectionVariables.set('requestTransactionId', txn);"
+        ]
+      }
+    }
+  ],
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8081/discovery/v1", "type": "string" },
     { "key": "companyName", "value": "probestack", "type": "string" },
@@ -14,7 +46,8 @@
     { "key": "jobId", "value": "", "type": "string" },
     { "key": "discoveryId", "value": "", "type": "string" },
     { "key": "sourceDiscoveryId", "value": "", "type": "string" },
-    { "key": "revision", "value": "", "type": "string" }
+    { "key": "revision", "value": "", "type": "string" },
+    { "key": "requestTransactionId", "value": "", "type": "string" }
   ],
   "item": [
     {
@@ -110,7 +143,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/inventory", "host": ["{{baseUrl}}"], "path": ["wso2", "inventory"] },
             "description": "Cheap, list-only pre-flight pass. Acquires one OAuth token with publisher+admin+devportal scopes, then in parallel hits every list endpoint:\n  - GET /api/am/publisher/v4/apis\n  - GET /api/am/publisher/v4/api-products\n  - GET /api/am/publisher/v4/endpoint-certificates\n  - GET /api/am/admin/v4/key-managers\n  - GET /api/am/admin/v4/scopes\n  - GET /api/am/admin/v4/throttling/policies/{subscription,application,advanced}\n  - GET /api/am/devportal/v3/applications\n  - GET /api/am/devportal/v3/subscriptions\n\nReturns summary lists per resource type. Does NOT persist to MongoDB and does NOT allocate a revision. If one endpoint fails (e.g. insufficient scope), that list is empty and an entry appears in response.errors keyed by the resource slug."
@@ -147,7 +180,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"environment\": \"{{environment}}\",\n    \"userEmail\": \"{{userEmail}}\",\n    \"notes\": \"postman run\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"environment\": \"{{environment}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\",\n    \"notes\": \"postman run\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/apis", "host": ["{{baseUrl}}"], "path": ["wso2", "apis"] },
             "description": "Discovers all APIs in the WSO2 tenant via the Publisher REST API v4.\n\nFlow: acquire token → list APIs → fetch each API definition → upsert snapshots to `discovery_wso2_apis` → return apiDetails list.\n\nResponse `type` = `apis`, populated detail field = `apiDetails: ApiDetail[]`."
@@ -182,7 +215,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/applications", "host": ["{{baseUrl}}"], "path": ["wso2", "applications"] },
             "description": "Discover all DevPortal Applications via GET /api/am/devportal/v3/applications.\n\nFlow: acquire token (devportal scope) -> list applications -> upsert snapshots to `discovery_wso2_applications` -> return applicationDetails.\n\nResponse `type` = `applications`, populated detail field = `applicationDetails: ApplicationDetail[]` (id, name, owner, status, throttlingPolicy, tokenType, groupId, subscriber, subscriptionCount)."
@@ -216,7 +249,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/subscriptions", "host": ["{{baseUrl}}"], "path": ["wso2", "subscriptions"] },
             "description": "Discover app <-> API Subscriptions via GET /api/am/devportal/v3/subscriptions.\n\nFlow: acquire token (devportal scope) -> list subscriptions -> upsert snapshots to `discovery_wso2_subscriptions` -> return subscriptionDetails.\n\nSubscriptions are the spine of the migrator: every Consumer + credential created on the Kong side starts from a row here.\n\nResponse `type` = `subscriptions`, populated detail field = `subscriptionDetails: SubscriptionDetail[]` (id, applicationId/Name, apiId/Name/Version/Context, throttlingPolicy, status)."
@@ -251,7 +284,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/throttlingpolicies", "host": ["{{baseUrl}}"], "path": ["wso2", "throttlingpolicies"] },
             "description": "Discover Throttling Policies across all three tier families:\n  - GET /api/am/admin/v4/throttling/policies/subscription\n  - GET /api/am/admin/v4/throttling/policies/application\n  - GET /api/am/admin/v4/throttling/policies/advanced\n\nMerges all three into one snapshot stream tagged with `policyType`. Required scope: `apim:admin`.\n\nFlow: acquire token (admin scope) -> list all 3 tier families -> tag each item with its policyType -> upsert snapshots to `discovery_wso2_throttlingpolicies` -> return throttlingPolicyDetails.\n\nResponse `type` = `throttlingpolicies`, detail field = `throttlingPolicyDetails: ThrottlingPolicyDetail[]` (id, name, displayName, policyType, requestCount, dataAmount, dataUnit, timeUnit, unitTime, stopOnQuotaReach, billingPlan, isDeployed)."
@@ -285,7 +318,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/keymanagers", "host": ["{{baseUrl}}"], "path": ["wso2", "keymanagers"] },
             "description": "Discover registered Key Managers via GET /api/am/admin/v4/key-managers. Required scope: `apim:admin`.\n\nFlow: acquire token (admin scope) -> list key managers -> upsert snapshots to `discovery_wso2_keymanagers` -> return keyManagerDetails.\n\nKey Manager type drives downstream Kong auth-plugin choice:\n  - default Resident KM (JWT)  -> Kong `jwt` plugin with WSO2 signing key\n  - federated OIDC (Keycloak / Okta / Auth0 / WSO2-IS) -> Kong `openid-connect` plugin\n\nResponse `type` = `keymanagers`, detail field = `keyManagerDetails: KeyManagerDetail[]` (id, name, type, enabled, issuer, tokenEndpoint, introspectionEndpoint, jwksEndpoint, availableGrantTypes, tokenType)."
@@ -319,7 +352,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/apiproducts", "host": ["{{baseUrl}}"], "path": ["wso2", "apiproducts"] },
             "description": "Discover all API Products via GET /api/am/publisher/v4/api-products. Required scope: `apim:api_view`.\n\nAPI Products bundle operations from one or more existing APIs. Each snapshot is persisted to `discovery_wso2_apiproducts`.\n\nResponse `type` = `apiproducts`, detail field = `apiProductDetails: ApiProductDetail[]` (id, name, version, context, provider, state, description, apiCount)."
@@ -353,7 +386,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/scopes", "host": ["{{baseUrl}}"], "path": ["wso2", "scopes"] },
             "description": "Discover all shared OAuth2 scopes via GET /api/am/admin/v4/scopes. Required scope: `apim:admin`.\n\nScopes drive Kong authorization translation: WSO2 binds scopes to roles, Kong binds them to consumer groups / ACL lists.\n\nEach snapshot is persisted to `discovery_wso2_scopes`. Response `type` = `scopes`, detail field = `scopeDetails: ScopeDetail[]` (id, name, displayName, description, bindings, usageCount)."
@@ -387,7 +420,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/certificates", "host": ["{{baseUrl}}"], "path": ["wso2", "certificates"] },
             "description": "Discover all endpoint TLS certificates via GET /api/am/publisher/v4/endpoint-certificates. Required scope: `apim:api_view`.\n\nEach certificate is keyed by alias and bound to a backend endpoint URL. Used downstream to populate Kong certificate + SNI objects.\n\nEach snapshot is persisted to `discovery_wso2_certificates`. Response `type` = `certificates`, detail field = `certificateDetails: CertificateDetail[]` (alias, endpoint, subject, issuer, expiryDate, validFrom, serialNumber, version)."
@@ -422,7 +455,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/mediationpolicies", "host": ["{{baseUrl}}"], "path": ["wso2", "mediationpolicies"] },
             "description": "Discover Mediation Policies (Synapse sequences applied to in/out/fault flows). Required scope: `apim:api_view`.\n\nWSO2 4.x has no tenant-wide mediation-policies endpoint - policies are per-API. This call:\n  1. Lists every API (Publisher v4 /apis)\n  2. For each API, GET /apis/{apiId}/mediation-policies\n  3. Tags each policy with apiId / apiName / apiVersion / scope=api\n\nCost is O(N) Publisher calls where N = number of APIs in the tenant.\n\nResponse `type` = `mediationpolicies`, detail field = `mediationPolicyDetails: MediationPolicyDetail[]` (id, name, type=in/out/fault, scope, apiId, apiName, apiVersion, shared, contentType)."
@@ -456,7 +489,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/wso2/users", "host": ["{{baseUrl}}"], "path": ["wso2", "users"] },
             "description": "Discover WSO2 users from the SCIM 2.0 user store via GET /scim2/Users. Required scope: `apim:admin` (or whichever scope the OAuth client was granted SCIM read for).\n\nSCIM has a different response shape than the APIM REST APIs - the wrapper key is `Resources` (capital R), and pagination uses `startIndex` (1-based) + `count`.\n\nIf SCIM is gated on Basic admin auth instead of bearer tokens in your build, the call 401s and the discovery returns empty with a log warning. Grant the SCIM scope to the OAuth client (or we add a Basic-auth fallback later).\n\nResponse `type` = `users`, detail field = `userDetails: UserDetail[]` (id, userName, displayName, emails, active, roles, userType)."
@@ -482,10 +515,11 @@
                 { "key": "companyName", "value": "{{companyName}}" },
                 { "key": "wso2Tenant", "value": "{{wso2Tenant}}" },
                 { "key": "limit", "value": "10" },
-                { "key": "resourceType", "value": "apis", "disabled": true }
+                { "key": "resourceType", "value": "apis", "disabled": true },
+                { "key": "requestTransactionId", "value": "{{discoveryId}}", "disabled": true }
               ]
             },
-            "description": "List past discoveries with per-resource-type counts. Reads across all discovery_wso2_* collections and groups by (discoveryId, revision). Sorted by revision descending. Optional resourceType filter restricts the count to one type."
+            "description": "List past discoveries with per-resource-type counts. Reads across all discovery_wso2_* collections and groups by (historyId, revision). Sorted by revision descending. Response mirrors the Apigee /history shape: `{ companyName, wso2Tenant, history: [{ historyId, fetchedAt, revision, summary }], processingTimeMs }`.\n\nOptional filters:\n- `resourceType` restricts which collections are scanned and what shows up in `summary`.\n- `requestTransactionId` filters to one specific discovery run (matches `historyId`). Enable the disabled query param above to use it; default value pulls from the `discoveryId` collection variable set by the last discovery POST."
           },
           "response": []
         },
@@ -911,7 +945,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"userEmail\": \"{{userEmail}}\",\n    \"resourceTypes\": [\n        \"apis\",\n        \"apiproducts\",\n        \"applications\",\n        \"subscriptions\",\n        \"throttlingpolicies\",\n        \"keymanagers\",\n        \"scopes\",\n        \"certificates\",\n        \"mediationpolicies\",\n        \"users\"\n    ]\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"requestTransactionId\": \"{{requestTransactionId}}\",\n    \"userEmail\": \"{{userEmail}}\",\n    \"resourceTypes\": [\n        \"apis\",\n        \"apiproducts\",\n        \"applications\",\n        \"subscriptions\",\n        \"throttlingpolicies\",\n        \"keymanagers\",\n        \"scopes\",\n        \"certificates\",\n        \"mediationpolicies\",\n        \"users\"\n    ]\n}"
             },
             "url": { "raw": "{{baseUrl}}/discoveries", "host": ["{{baseUrl}}"], "path": ["discoveries"] },
             "description": "Starts an async bulk discovery. Returns 201 with a job id; the worker runs on the discoveryExecutor thread pool.\n\n`resourceTypes` is optional. If omitted, defaults to all implemented resource types.\n\nImplemented slugs (May 2026):\n  - apis\n  - apiproducts\n  - applications\n  - subscriptions\n  - throttlingpolicies\n  - keymanagers\n  - scopes\n  - certificates\n  - mediationpolicies (per-API loop, O(N) cost)\n  - users (SCIM 2.0)\n\nAll planned per-resource endpoints are now implemented.\n\nAll resource-type discoveries within one bulk run share the same revision number, allocated when the first sub-discovery runs."

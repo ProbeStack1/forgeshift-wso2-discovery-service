@@ -37,11 +37,12 @@ public class Wso2HistoryController {
             @RequestParam(required = false) String companyName,
             @RequestParam String wso2Tenant,
             @RequestParam(required = false) String resourceType,
+            @RequestParam(required = false) String requestTransactionId,
             @RequestParam(defaultValue = "10") int limit) {
         String c = StringUtils.hasText(companyName) ? companyName : discoveryProps.getDefaultCompanyName();
-        log.info("GET /wso2/history company={} tenant={} resourceType={} limit={}",
-                c, wso2Tenant, resourceType, limit);
-        return ResponseEntity.ok(service.list(c, wso2Tenant, resourceType, limit));
+        log.info("GET /wso2/history company={} tenant={} resourceType={} requestTransactionId={} limit={}",
+                c, wso2Tenant, resourceType, requestTransactionId, limit);
+        return ResponseEntity.ok(service.list(c, wso2Tenant, resourceType, requestTransactionId, limit));
     }
 
     @GetMapping("/revisions")

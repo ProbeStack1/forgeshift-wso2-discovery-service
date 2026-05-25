@@ -56,6 +56,9 @@ public class Wso2InventoryService {
         if (req == null || !StringUtils.hasText(req.getWso2Tenant())) {
             throw new IllegalArgumentException("wso2Tenant is required");
         }
+        if (!StringUtils.hasText(req.getRequestTransactionId())) {
+            throw new IllegalArgumentException("requestTransactionId is required (must be supplied by the caller)");
+        }
 
         String token = tokenService.getToken(wso2Props.inventoryScope(),
                 req.getCompanyName(), req.getWso2Tenant());
@@ -63,9 +66,7 @@ public class Wso2InventoryService {
             throw new IllegalStateException("Failed to acquire WSO2 access token for inventory");
         }
 
-        String txn = StringUtils.hasText(req.getRequestTransactionId())
-                ? req.getRequestTransactionId()
-                : UUID.randomUUID().toString();
+        String txn = req.getRequestTransactionId();
 
         // Issue every list call in parallel.
         Map<String, String> errors = new java.util.concurrent.ConcurrentHashMap<>();

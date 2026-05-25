@@ -7,13 +7,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Map;
 
 /**
- * One row in the {@code GET /wso2/history} response: a past discovery
- * identified by ({@code discoveryId}, {@code revision}), with per-resource
- * counts so the UI can render a summary card without drilling down.
+ * One entry in the {@code GET /wso2/history} response. Mirrors the Apigee
+ * {@code HistorySnapshotItem}: a past discovery identified by a historyId
+ * (the requestTransactionId stamped on every snapshot of that run) and the
+ * per-resource counts that made it up.
  */
 @Data
 @Builder
@@ -22,18 +23,17 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class HistorySnapshot {
 
-    @Schema(description = "Correlation id allocated at discovery time", example = "32abcc62-...")
-    private String discoveryId;
+    @Schema(description = "Discovery transaction id (requestTransactionId)",
+            example = "NKTA_probestack_carbon.super_20260525174630990")
+    private String historyId;
 
-    @Schema(description = "Monotonic revision for this (companyName, wso2Tenant)", example = "3")
+    @Schema(description = "When the discovery run produced this snapshot",
+            example = "2026-05-25T12:16:49.755626957Z")
+    private OffsetDateTime fetchedAt;
+
+    @Schema(description = "Monotonic revision for this (companyName, wso2Tenant)", example = "170")
     private Integer revision;
 
-    @Schema(description = "Earliest snapshot timestamp seen for this discoveryId")
-    private Instant snapshotAt;
-
-    @Schema(description = "Per-resource-type counts: {apis: 17, applications: 3, ...}")
-    private Map<String, Integer> resourceCounts;
-
-    @Schema(description = "Sum of every count in resourceCounts")
-    private int totalCount;
+    @Schema(description = "Per-resource-type counts, e.g. {\"apis\":12,\"applications\":5,...}")
+    private Map<String, Object> summary;
 }

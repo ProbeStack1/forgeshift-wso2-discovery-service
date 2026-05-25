@@ -16,7 +16,6 @@ import org.springframework.util.StringUtils;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Common scaffolding for per-resource discovery services.
@@ -95,9 +94,9 @@ public abstract class BaseDiscoveryService {
             throw new IllegalStateException("Failed to acquire WSO2 access token");
         }
 
-        String discoveryId = StringUtils.hasText(req.getRequestTransactionId())
-                ? req.getRequestTransactionId()
-                : UUID.randomUUID().toString();
+        // The discoveryId is always supplied by the caller (UI). Mirrors the
+        // Apigee discovery contract — the backend never invents one.
+        String discoveryId = req.getRequestTransactionId();
 
         int revision = revisionService.nextRevision(
                 req.getCompanyName(),
@@ -176,6 +175,12 @@ public abstract class BaseDiscoveryService {
         }
         if (!StringUtils.hasText(req.getWso2Tenant())) {
             throw new IllegalArgumentException("wso2Tenant is required");
+        }
+        if (!StringUtils.hasText(req.getRequestTransactionId())) {
+            // Defence in depth: @NotBlank on the DTO catches direct HTTP
+            // callers, but internal callers (the bulk fan-out, tests) bypass
+            // @Valid, so we re-check here.
+            throw new IllegalArgumentException("requestTransactionId is required (must be supplied by the caller)");
         }
         // companyName is defaulted upstream in the controller.
     }

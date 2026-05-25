@@ -22,7 +22,12 @@ public class DiscoverResourceRequest {
     /** Logical environment label for traceability (e.g. "prod", "stage"). Optional. */
     private String environment;
 
-    /** Caller-supplied transaction id; if missing, the service generates one. */
+    /**
+     * Caller-supplied discovery transaction id. Must be supplied by the UI —
+     * the backend will not generate one. Persists on every snapshot written
+     * by this run and is what the history / details endpoints use to find it.
+     */
+    @NotBlank
     private String requestTransactionId;
 
     /** Initiating user email, recorded on the revision counter. */

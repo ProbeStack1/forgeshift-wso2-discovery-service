@@ -28,7 +28,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+
+import org.springframework.util.StringUtils;
 
 /**
  * Orchestrates a bulk discovery job by fanning out to per-resource services.
@@ -59,11 +60,16 @@ public class DiscoveryService {
      * Create a job document and kick off the async fan-out.
      */
     public DiscoveryJob startDiscovery(StartDiscoveryRequest req) {
+        if (!StringUtils.hasText(req.getRequestTransactionId())) {
+            // Defence in depth: @NotBlank on the DTO catches direct HTTP
+            // callers, but other entry points may skip @Valid.
+            throw new IllegalArgumentException("requestTransactionId is required (must be supplied by the caller)");
+        }
         DiscoveryJob job = DiscoveryJob.builder()
                 .companyName(req.getCompanyName())
                 .wso2Tenant(req.getWso2Tenant())
                 .wso2BaseUrl(wso2Props.getBaseUrl())
-                .discoveryId(UUID.randomUUID().toString())
+                .discoveryId(req.getRequestTransactionId())
                 .state(DiscoveryState.PENDING)
                 .resourceProgress(new HashMap<>())
                 .build();

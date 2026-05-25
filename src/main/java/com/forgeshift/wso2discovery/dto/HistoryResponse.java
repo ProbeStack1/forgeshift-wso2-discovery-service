@@ -9,7 +9,12 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-/** Response for {@code GET /wso2/history}. */
+/**
+ * Response for {@code GET /wso2/history}. Same shape as the Apigee
+ * {@code DiscoveryHistoryResponse} — companyName + tenant + history list +
+ * processing time — with {@code wso2Tenant} standing in for Apigee's
+ * (organization, environment) pair.
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -17,18 +22,15 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class HistoryResponse {
 
-    @Schema(description = "Multi-tenancy partner id")
+    @Schema(description = "Multi-tenancy partner id", example = "probestack")
     private String companyName;
 
-    @Schema(description = "WSO2 tenant the history covers")
+    @Schema(description = "WSO2 tenant the history covers", example = "carbon.super")
     private String wso2Tenant;
 
-    @Schema(description = "Optional resourceType filter applied")
-    private String resourceType;
+    @Schema(description = "Last N discovery snapshots, newest first")
+    private List<HistorySnapshot> history;
 
-    @Schema(description = "Discoveries in reverse-chronological order (most recent first)")
-    private List<HistorySnapshot> snapshots;
-
-    @Schema(description = "Number of entries in snapshots")
-    private int totalSnapshots;
+    @Schema(description = "Total API processing time in milliseconds", example = "286")
+    private Long processingTimeMs;
 }
