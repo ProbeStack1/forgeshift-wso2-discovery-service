@@ -54,6 +54,7 @@
     { "key": "baseUrl", "value": "http://localhost:8081/discovery/v1", "type": "string" },
     { "key": "companyName", "value": "probestack", "type": "string" },
     { "key": "wso2Tenant", "value": "carbon.super", "type": "string" },
+    { "key": "profileName", "value": "primary", "type": "string" },
     { "key": "userEmail", "value": "ops@local", "type": "string" },
     { "key": "environment", "value": "", "type": "string" },
     { "key": "jobId", "value": "", "type": "string" },
@@ -786,10 +787,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"wso2Tenant\": \"{{wso2Tenant}}\",\n    \"wso2BaseUrl\": \"https://34.133.77.23:9443\",\n    \"username\": \"admin\",\n    \"password\": \"admin\",\n    \"clientId\": \"{{$randomUUID}}\",\n    \"clientSecret\": \"REPLACE_ME\",\n    \"trustSelfSigned\": true,\n    \"notes\": \"local test profile\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"profileName\": \"{{profileName}}\",\n    \"tenants\": [\"{{wso2Tenant}}\"],\n    \"wso2BaseUrl\": \"https://34.133.77.23:9443\",\n    \"username\": \"admin\",\n    \"password\": \"admin\",\n    \"clientId\": \"{{$randomUUID}}\",\n    \"clientSecret\": \"REPLACE_ME\",\n    \"trustSelfSigned\": true,\n    \"notes\": \"local test profile\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/profiles", "host": ["{{baseUrl}}"], "path": ["profiles"] },
-            "description": "Create or update a per-tenant WSO2 connection profile. Secrets are accepted as plain text but masked on every read. Composite id `{companyName}|{wso2Tenant}` makes re-posting idempotent."
+            "description": "Create / update a WSO2 connection profile (single doc per (companyName, profileName)). The `tenants[]` array is what the token resolver matches against — must contain at least `carbon.super`. Secrets are accepted as plain text but masked on every read. Composite id `{companyName}|{profileName}` makes re-posting idempotent.\n\nNote: this admin endpoint lives on the discovery service and writes raw shape. For the full auto-discovery flow (DCR + tenant discovery), use the profile-config service's `POST /wso2/profiles` instead."
           },
           "response": []
         },
@@ -813,30 +814,30 @@
           "response": []
         },
         {
-          "name": "GET /profiles/{companyName}/{wso2Tenant}",
+          "name": "GET /profiles/{companyName}/{profileName}",
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
             "url": {
-              "raw": "{{baseUrl}}/profiles/{{companyName}}/{{wso2Tenant}}",
+              "raw": "{{baseUrl}}/profiles/{{companyName}}/{{profileName}}",
               "host": ["{{baseUrl}}"],
-              "path": ["profiles", "{{companyName}}", "{{wso2Tenant}}"]
+              "path": ["profiles", "{{companyName}}", "{{profileName}}"]
             },
             "description": "Read one profile. Secrets masked."
           },
           "response": []
         },
         {
-          "name": "DELETE /profiles/{companyName}/{wso2Tenant}",
+          "name": "DELETE /profiles/{companyName}/{profileName}",
           "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/profiles/{{companyName}}/{{wso2Tenant}}",
+              "raw": "{{baseUrl}}/profiles/{{companyName}}/{{profileName}}",
               "host": ["{{baseUrl}}"],
-              "path": ["profiles", "{{companyName}}", "{{wso2Tenant}}"]
+              "path": ["profiles", "{{companyName}}", "{{profileName}}"]
             },
-            "description": "Remove a profile. Subsequent discoveries for this tenant fall back to the static forgeshift.wso2.* config."
+            "description": "Remove a profile. Subsequent discoveries for any tenant it managed fall back to the static forgeshift.wso2.* config until another profile takes over."
           },
           "response": []
         },
