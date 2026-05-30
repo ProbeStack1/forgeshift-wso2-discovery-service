@@ -51,12 +51,13 @@ public class Wso2TenantProfile {
     private String profileName;
 
     /**
-     * Tenants this profile manages. Always contains at least
-     * {@code carbon.super}; additional entries come from the WSO2 tenants
-     * API at create time. The resolver matches a requested tenant against
-     * this list.
+     * The single tenant this profile binds to (chosen by the user via the
+     * profile-config service's info → save flow). The resolver matches a
+     * requested tenant against this value (exact equality). Earlier
+     * revisions used a {@code tenants[]} array; that's now simplified to
+     * one profile per tenant.
      */
-    private List<String> tenants;
+    private String defaultWso2Tenant;
 
     /** WSO2 base URL for this tenant, e.g. https://wso2.example.com:9443. */
     private String wso2BaseUrl;

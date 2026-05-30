@@ -44,7 +44,7 @@ public class Wso2TenantProfileService {
     public Wso2Credentials resolve(String companyName, String wso2Tenant) {
         if (StringUtils.hasText(companyName) && StringUtils.hasText(wso2Tenant)) {
             java.util.List<Wso2TenantProfile> all =
-                    repository.findByCompanyNameAndTenantsOrderByUpdatedAtDesc(companyName, wso2Tenant);
+                    repository.findByCompanyNameAndDefaultWso2TenantOrderByUpdatedAtDesc(companyName, wso2Tenant);
             Wso2TenantProfile chosen = all.stream()
                     .filter(p -> p.getStatus() == null
                             || "ACTIVE".equalsIgnoreCase(p.getStatus()))

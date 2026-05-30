@@ -39,8 +39,8 @@ public class Wso2ProfilesController {
 
     @PostMapping
     public ResponseEntity<Wso2TenantProfileDto> upsert(@Valid @RequestBody Wso2TenantProfileDto body) {
-        log.info("POST /profiles company={} profile={} tenants={}",
-                body.getCompanyName(), body.getProfileName(), body.getTenants());
+        log.info("POST /profiles company={} profile={} defaultWso2Tenant={}",
+                body.getCompanyName(), body.getProfileName(), body.getDefaultWso2Tenant());
         Wso2TenantProfile saved = service.save(body.toDomain());
         return ResponseEntity.ok(Wso2TenantProfileDto.fromMasked(saved));
     }

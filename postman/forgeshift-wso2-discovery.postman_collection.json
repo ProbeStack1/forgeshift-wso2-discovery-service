@@ -787,10 +787,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"profileName\": \"{{profileName}}\",\n    \"tenants\": [\"{{wso2Tenant}}\"],\n    \"wso2BaseUrl\": \"https://34.133.77.23:9443\",\n    \"username\": \"admin\",\n    \"password\": \"admin\",\n    \"clientId\": \"{{$randomUUID}}\",\n    \"clientSecret\": \"REPLACE_ME\",\n    \"trustSelfSigned\": true,\n    \"notes\": \"local test profile\"\n}"
+              "raw": "{\n    \"companyName\": \"{{companyName}}\",\n    \"profileName\": \"{{profileName}}\",\n    \"defaultWso2Tenant\": \"{{wso2Tenant}}\",\n    \"wso2BaseUrl\": \"https://34.133.77.23:9443\",\n    \"username\": \"admin\",\n    \"password\": \"admin\",\n    \"clientId\": \"{{$randomUUID}}\",\n    \"clientSecret\": \"REPLACE_ME\",\n    \"trustSelfSigned\": true,\n    \"notes\": \"local test profile\"\n}"
             },
             "url": { "raw": "{{baseUrl}}/profiles", "host": ["{{baseUrl}}"], "path": ["profiles"] },
-            "description": "Create / update a WSO2 connection profile (single doc per (companyName, profileName)). The `tenants[]` array is what the token resolver matches against — must contain at least `carbon.super`. Secrets are accepted as plain text but masked on every read. Composite id `{companyName}|{profileName}` makes re-posting idempotent.\n\nNote: this admin endpoint lives on the discovery service and writes raw shape. For the full auto-discovery flow (DCR + tenant discovery), use the profile-config service's `POST /wso2/profiles` instead."
+            "description": "Create / update a WSO2 connection profile (single doc per (companyName, profileName)). The `defaultWso2Tenant` field is what the token resolver matches against (exact equality). Secrets are accepted as plain text but masked on every read. Composite id `{companyName}|{profileName}` makes re-posting idempotent.\n\nNote: this admin endpoint lives on the discovery service and writes raw shape. For the full auto-discovery flow (DCR + tenant discovery + tenant picker), use the profile-config service's `POST /wso2/profiles/info` → `POST /wso2/profiles/save` flow instead."
           },
           "response": []
         },

@@ -35,9 +35,9 @@ public class Wso2TenantProfileDto {
     @Schema(description = "Profile name (unique per company)", example = "primary")
     private String profileName;
 
-    @Schema(description = "Tenants this profile manages",
-            example = "[\"carbon.super\", \"bank.local\"]")
-    private List<String> tenants;
+    @Schema(description = "The single tenant this profile binds to",
+            example = "carbon.super")
+    private String defaultWso2Tenant;
 
     @NotBlank
     @Schema(description = "WSO2 base URL", example = "https://wso2.example.com:9443")
@@ -72,7 +72,7 @@ public class Wso2TenantProfileDto {
                 .id(p.getId())
                 .companyName(p.getCompanyName())
                 .profileName(p.getProfileName())
-                .tenants(p.getTenants())
+                .defaultWso2Tenant(p.getDefaultWso2Tenant())
                 .wso2BaseUrl(p.getWso2BaseUrl())
                 .username(p.getUsername())
                 .password(mask(p.getPassword()))
@@ -90,7 +90,7 @@ public class Wso2TenantProfileDto {
         return Wso2TenantProfile.builder()
                 .companyName(companyName)
                 .profileName(profileName)
-                .tenants(tenants)
+                .defaultWso2Tenant(defaultWso2Tenant)
                 .wso2BaseUrl(wso2BaseUrl)
                 .username(username)
                 .password(password)

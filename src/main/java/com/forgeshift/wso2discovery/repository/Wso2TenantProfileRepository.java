@@ -13,13 +13,14 @@ public interface Wso2TenantProfileRepository extends MongoRepository<Wso2TenantP
     Optional<Wso2TenantProfile> findByCompanyNameAndProfileName(String companyName, String profileName);
 
     /**
-     * All profiles for {@code companyName} whose {@code tenants} array
-     * contains {@code wso2Tenant}, most recently updated first. The token
-     * service filters this list by status==ACTIVE (treating null/missing
-     * status as ACTIVE for back-compat) and takes the first hit.
+     * All profiles for {@code companyName} whose single
+     * {@code defaultWso2Tenant} matches the requested tenant, most
+     * recently updated first. The token service filters this list by
+     * status==ACTIVE (treating null/missing status as ACTIVE for
+     * back-compat) and takes the first hit.
      */
-    List<Wso2TenantProfile> findByCompanyNameAndTenantsOrderByUpdatedAtDesc(
-            String companyName, String wso2Tenant);
+    List<Wso2TenantProfile> findByCompanyNameAndDefaultWso2TenantOrderByUpdatedAtDesc(
+            String companyName, String defaultWso2Tenant);
 
     Page<Wso2TenantProfile> findByCompanyName(String companyName, Pageable pageable);
 }
