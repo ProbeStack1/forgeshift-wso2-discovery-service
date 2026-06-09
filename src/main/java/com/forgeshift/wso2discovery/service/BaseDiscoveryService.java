@@ -11,7 +11,9 @@ import com.forgeshift.wso2discovery.repository.BaseDiscoveryRepository;
 import com.forgeshift.wso2discovery.util.PayloadCleaner;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -93,8 +95,8 @@ public abstract class BaseDiscoveryService {
 
         // Acquire an access token. Goes through the cache: profile lookup +
         // static fallback + WSO2 token call all happen inside tokenService.
-        String token = tokenService.getToken(scopeForResource(),
-                req.getCompanyName(), req.getWso2Tenant());
+        String scope = scopeForResource();
+        String token = tokenService.getToken(scope, req.getCompanyName(), req.getWso2Tenant());
         if (token == null) {
             throw new IllegalStateException("Failed to acquire WSO2 access token");
         }
@@ -114,8 +116,25 @@ public abstract class BaseDiscoveryService {
         try {
             items = fetchFromWso2(token, req);
         } catch (Exception e) {
-            log.error("[{}] fetch failed: {}", resourceSlug, e.getMessage(), e);
-            throw new IllegalStateException("Failed to fetch " + resourceSlug + " from WSO2: " + e.getMessage(), e);
+            if (isUnauthorized(e)) {
+                log.warn("[{}] WSO2 returned 401; invalidating cached token and retrying once (company={} tenant={})",
+                        resourceSlug, req.getCompanyName(), req.getWso2Tenant());
+                tokenService.invalidate(req.getCompanyName(), req.getWso2Tenant(), scope);
+                String freshToken = tokenService.getToken(scope, req.getCompanyName(), req.getWso2Tenant());
+                if (freshToken != null) {
+                    try {
+                        items = fetchFromWso2(freshToken, req);
+                    } catch (Exception retryException) {
+                        log.error("[{}] fetch retry failed: {}", resourceSlug, retryException.getMessage(), retryException);
+                        throw new IllegalStateException("Failed to fetch " + resourceSlug + " from WSO2: " + retryException.getMessage(), retryException);
+                    }
+                } else {
+                    throw new IllegalStateException("Failed to refresh WSO2 access token after 401", e);
+                }
+            } else {
+                log.error("[{}] fetch failed: {}", resourceSlug, e.getMessage(), e);
+                throw new IllegalStateException("Failed to fetch " + resourceSlug + " from WSO2: " + e.getMessage(), e);
+            }
         }
 
         // Persist snapshots
@@ -253,5 +272,17 @@ public abstract class BaseDiscoveryService {
 
     protected static String compositeId(String company, String tenant, String resource, String sourceId, int revision) {
         return String.format("%s|%s|%s|%s|%d", company, tenant, resource, sourceId, revision);
+    }
+
+    private static boolean isUnauthorized(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof WebClientResponseException responseException
+                    && responseException.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }
