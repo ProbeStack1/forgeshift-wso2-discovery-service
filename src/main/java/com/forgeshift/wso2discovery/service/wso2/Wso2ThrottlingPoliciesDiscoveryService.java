@@ -93,17 +93,33 @@ public class Wso2ThrottlingPoliciesDiscoveryService extends BaseDiscoveryService
         Map<String, Object> p = snap.getPayload() != null ? snap.getPayload() : Collections.emptyMap();
         Map<String, Object> limit = nestedMap(p, "defaultLimit");
 
+        Long requestCount = asLong(limit.get("requestCount"));
+        String timeUnit = str(limit.get("timeUnit"));
+        Integer unitTime = asInt(limit.get("unitTime"));
+
+        // WSO2's throttling-policy LIST endpoints omit defaultLimit, so the number survives only in
+        // the human-readable description ("Allows 1000 requests per minute"). Recover it so the
+        // discovered policy still exposes the limit (the Kong rate-limiting translation needs it).
+        if (requestCount == null) {
+            ThrottleLimitParser.Limit parsed = ThrottleLimitParser.parse(str(p.get("description")));
+            if (parsed != null) {
+                requestCount = parsed.requestCount();
+                if (timeUnit == null) timeUnit = parsed.timeUnit();
+                if (unitTime == null) unitTime = parsed.unitTime();
+            }
+        }
+
         return ThrottlingPolicyDetail.builder()
                 .id(snap.getSourceId())
                 .name(snap.getSourceName())
                 .displayName(str(p.get("displayName")))
                 .description(str(p.get("description")))
                 .policyType(str(p.get("__policyType")))
-                .requestCount(asLong(limit.get("requestCount")))
+                .requestCount(requestCount)
                 .dataAmount(asLong(limit.get("dataAmount")))
                 .dataUnit(str(limit.get("dataUnit")))
-                .timeUnit(str(limit.get("timeUnit")))
-                .unitTime(asInt(limit.get("unitTime")))
+                .timeUnit(timeUnit)
+                .unitTime(unitTime)
                 .stopOnQuotaReach(asBool(p.get("stopOnQuotaReach")))
                 .billingPlan(str(p.get("billingPlan")))
                 .isDeployed(asBool(p.get("isDeployed")))

@@ -118,11 +118,25 @@ public class Wso2ApisDiscoveryService extends BaseDiscoveryService {
                 .transports(asStringList(p.get("transport")))
                 .tags(asStringList(p.get("tags")))
                 .description(str(p.get("description")))
+                // Audit fields are already in the raw payload: the full getApi
+                // response carries lastUpdatedTime, and the list summary carries
+                // updatedTime/updatedBy (merged in fetchFromWso2). No extra WSO2
+                // call needed, and stored snapshots back-fill history/details too.
+                .lastChangedAt(firstNonBlank(str(p.get("lastUpdatedTime")), str(p.get("updatedTime"))))
+                .lastChangedBy(str(p.get("updatedBy")))
                 .build();
     }
 
     private static String str(Object o) {
         return o == null ? null : o.toString();
+    }
+
+    /** First non-blank candidate, or null if all are blank/absent. */
+    private static String firstNonBlank(String... candidates) {
+        for (String c : candidates) {
+            if (c != null && !c.isBlank()) return c;
+        }
+        return null;
     }
 
     private static void putIfPresent(Map<String, String> m, String k, String v) {

@@ -65,4 +65,16 @@ public class ApiDetail {
     @JsonProperty("description")
     @Schema(description = "Free-form description")
     private String description;
+
+    @JsonProperty("lastChangedAt")
+    @Schema(description = "When the API was last updated in WSO2 (source lastUpdatedTime, "
+            + "falling back to the list summary's updatedTime). Pass-through of the WSO2 timestamp string.",
+            example = "2026-05-20T10:15:30Z")
+    private String lastChangedAt;
+
+    @JsonProperty("lastChangedBy")
+    @Schema(description = "WSO2 user who last updated the API (source updatedBy). May be null, or a system "
+            + "user such as wso2.system.user, when WSO2 did not record an interactive editor.",
+            example = "admin")
+    private String lastChangedBy;
 }
