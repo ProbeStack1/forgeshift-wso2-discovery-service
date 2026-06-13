@@ -39,6 +39,29 @@ public class Wso2ApiProductsDiscoveryService extends BaseDiscoveryService {
         List<Map<String, Object>> products = wso2Client.listApiProducts(accessToken);
         log.info("[apiproducts] Publisher returned {} products (company={} tenant={})",
                 products.size(), req.getCompanyName(), req.getWso2Tenant());
+
+        // The /api-products LIST endpoint omits the `apis` array (the member APIs); only the
+        // per-product DETAIL call returns it. Enrich each product with its detail so the snapshot
+        // carries its members — otherwise the migration translates the product into no Kong routes
+        // ("no member APIs in the snapshot"). Best-effort: a failed detail keeps the list payload.
+        int enriched = 0;
+        for (Map<String, Object> product : products) {
+            if (product.get("apis") instanceof List<?>) continue;   // already has members
+            String id = str(product.get("id"));
+            if (id == null) continue;
+            Map<String, Object> detail = wso2Client.getApiProduct(accessToken, id);
+            if (detail != null && detail.get("apis") instanceof List<?>) {
+                product.put("apis", detail.get("apis"));
+                if (!product.containsKey("operations") && detail.get("operations") != null) {
+                    product.put("operations", detail.get("operations"));
+                }
+                enriched++;
+            }
+        }
+        if (enriched > 0) {
+            log.info("[apiproducts] enriched {} product(s) with their member-API list from the detail call.",
+                    enriched);
+        }
         return products;
     }
 

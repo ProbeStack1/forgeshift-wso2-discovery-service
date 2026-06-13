@@ -210,6 +210,34 @@ public class Wso2Client {
         }
     }
 
+    /**
+     * Full detail of one API Product, {@code GET /api/am/publisher/v4/api-products/{id}}.
+     * Unlike the {@code /api-products} LIST endpoint, the detail includes the {@code apis}
+     * array (the member APIs) — needed so the migration can route the product's members.
+     * Returns null on failure (caller keeps the list-only payload).
+     */
+    public Map<String, Object> getApiProduct(String accessToken, String apiProductId) {
+        Objects.requireNonNull(accessToken, "accessToken");
+        Objects.requireNonNull(apiProductId, "apiProductId");
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = wso2WebClient.get()
+                    .uri(props.getPublisherApiBase() + "/api-products/" + apiProductId)
+                    .header("Authorization", "Bearer " + accessToken)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .timeout(Duration.ofSeconds(props.getRequestTimeoutSeconds()))
+                    .block();
+            return body;
+        } catch (WebClientResponseException e) {
+            log.warn("getApiProduct({}) failed: status={} body={}", apiProductId,
+                    e.getStatusCode(), e.getResponseBodyAsString());
+            return null;
+        }
+    }
+
     // =====================================================================
     // Inventory / list-only calls (used by POST /wso2/inventory)
     //
