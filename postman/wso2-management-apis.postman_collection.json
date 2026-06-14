@@ -1,0 +1,1794 @@
+{
+  "info": {
+    "_postman_id": "41f1fb0f-36dd-4774-bb38-wso2mgmtapis01",
+    "name": "WSO2 API Manager Management APIs - Forgeshift Migrator",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "# WSO2 API Manager Management APIs - Forgeshift Migrator\n\nCollection for direct WSO2 source management calls used by discovery/migration.\n\nQuick start:\n1. Set `wso2BaseUrl`, `wso2Username`, `wso2Password`, and either `clientBasicAuth` or `wso2ClientId`/`wso2ClientSecret`.\n2. If you do not have a client, run **Auth / Register DCR application**; its test script stores `wso2ClientId`, `wso2ClientSecret`, and `clientBasicAuth`.\n3. Run **Auth / Password grant token**; its test script stores `wso2AccessToken`.\n4. Run Publisher, DevPortal, Admin, or SCIM requests.\n\nSome SCIM endpoints in older WSO2 builds are configured for Basic admin auth instead of bearer tokens. If bearer returns 401, use `Authorization: Basic {{adminBasicAuth}}` for those requests or grant the SCIM/internal user-management scopes to the DCR app."
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register DCR application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Basic {{adminBasicAuth}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/client-registration/v0.17/register",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "client-registration",
+                "v0.17",
+                "register"
+              ]
+            },
+            "description": "Create a clientId/clientSecret for OAuth token calls when a profile does not already have one.\nAuth: basic-admin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"callbackUrl\": \"https://localhost\",\n  \"clientName\": \"forgeshift-migrator-{{$timestamp}}\",\n  \"owner\": \"{{wso2Username}}\",\n  \"grantType\": \"client_credentials password refresh_token\",\n  \"saasApp\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.clientId) pm.collectionVariables.set(\"wso2ClientId\", json.clientId);",
+                  "if (json.clientSecret) pm.collectionVariables.set(\"wso2ClientSecret\", json.clientSecret);",
+                  "if (json.clientId && json.clientSecret) {",
+                  "  pm.collectionVariables.set(\"clientBasicAuth\", btoa(json.clientId + \":\" + json.clientSecret));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Password grant token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Basic {{clientBasicAuth}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/oauth2/token",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            },
+            "description": "Acquire bearer token for Publisher, DevPortal, Admin, and SCIM calls.\nAuth: basic-client",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{wso2Username}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{wso2Password}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "{{inventoryScope}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.access_token) pm.collectionVariables.set(\"wso2AccessToken\", json.access_token);",
+                  "if (json.scope) pm.collectionVariables.set(\"lastGrantedScope\", json.scope);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Client credentials token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Basic {{gatewayClientBasicAuth}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/oauth2/token",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            },
+            "description": "Acquire gateway/runtime token for validation probes when required.\nAuth: basic-client",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "{{gatewayScope}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.access_token) pm.collectionVariables.set(\"wso2GatewayToken\", json.access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Publisher APIs",
+      "item": [
+        {
+          "name": "List APIs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Primary API inventory.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Get API",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/{{apiId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "{{apiId}}"
+              ]
+            },
+            "description": "Full API metadata for translation.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Get API swagger",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/{{apiId}}/swagger",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "{{apiId}}",
+                "swagger"
+              ]
+            },
+            "description": "OpenAPI definition for route/resource translation.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Export API ZIP",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/export?apiId={{apiId}}&format=JSON&preserveStatus=true",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "apiId",
+                  "value": "{{apiId}}"
+                },
+                {
+                  "key": "format",
+                  "value": "JSON"
+                },
+                {
+                  "key": "preserveStatus",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Migration bundle with definitions, deployments, sequences, and certificates.\nAuth: bearer\nScopes: apim:api_import_export"
+          },
+          "response": []
+        },
+        {
+          "name": "List API revisions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/{{apiId}}/revisions",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "{{apiId}}",
+                "revisions"
+              ]
+            },
+            "description": "Capture deployed revision/deployment details.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "List API mediation policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/{{apiId}}/mediation-policies?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "{{apiId}}",
+                "mediation-policies"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Discover per-API mediation sequences.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Get mediation policy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/{{apiId}}/mediation-policies/{{policyId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "{{apiId}}",
+                "mediation-policies",
+                "{{policyId}}"
+              ]
+            },
+            "description": "Fetch sequence XML/config for Kong plugin translation.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "API Products",
+      "item": [
+        {
+          "name": "List API products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/api-products?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "api-products"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Product inventory.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Get API product",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/api-products/{{apiProductId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "api-products",
+                "{{apiProductId}}"
+              ]
+            },
+            "description": "Product member API mapping.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Certificates",
+      "item": [
+        {
+          "name": "List endpoint certificates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/endpoint-certificates?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "endpoint-certificates"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Certificate metadata inventory.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Get endpoint certificate content",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/endpoint-certificates/{{certificateAlias}}/content",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "endpoint-certificates",
+                "{{certificateAlias}}",
+                "content"
+              ]
+            },
+            "description": "Fetch PEM content for Kong ca_certificates.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        },
+        {
+          "name": "List client certificates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/publisher/v4/apis/{{apiId}}/client-certificates?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "publisher",
+                "v4",
+                "apis",
+                "{{apiId}}",
+                "client-certificates"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "mTLS/client certificate inventory where enabled.\nAuth: bearer\nScopes: apim:api_view"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "DevPortal Applications",
+      "item": [
+        {
+          "name": "List applications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/applications?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "applications"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Application inventory for Kong consumers.\nAuth: bearer\nScopes: apim:app_manage"
+          },
+          "response": []
+        },
+        {
+          "name": "Get application",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/applications/{{applicationId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "applications",
+                "{{applicationId}}"
+              ]
+            },
+            "description": "Full application metadata.\nAuth: bearer\nScopes: apim:app_manage"
+          },
+          "response": []
+        },
+        {
+          "name": "Get application keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/applications/{{applicationId}}/keys/{{keyType}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "applications",
+                "{{applicationId}}",
+                "keys",
+                "{{keyType}}"
+              ]
+            },
+            "description": "Discover existing production/sandbox credentials.\nAuth: bearer\nScopes: apim:app_manage"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate application keys",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/applications/{{applicationId}}/generate-keys",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "applications",
+                "{{applicationId}}",
+                "generate-keys"
+              ]
+            },
+            "description": "Optional lab/test credential generation for validation.\nAuth: bearer\nScopes: apim:app_manage",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "DevPortal Subscriptions",
+      "item": [
+        {
+          "name": "List subscriptions by application",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/subscriptions?applicationId={{applicationId}}&limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "subscriptions"
+              ],
+              "query": [
+                {
+                  "key": "applicationId",
+                  "value": "{{applicationId}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Reliable all-subscriptions discovery by iterating applications.\nAuth: bearer\nScopes: apim:subscribe"
+          },
+          "response": []
+        },
+        {
+          "name": "List subscriptions by API",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/subscriptions?apiId={{apiId}}&limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "subscriptions"
+              ],
+              "query": [
+                {
+                  "key": "apiId",
+                  "value": "{{apiId}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "API dependency graph.\nAuth: bearer\nScopes: apim:subscribe"
+          },
+          "response": []
+        },
+        {
+          "name": "Create subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/devportal/v3/subscriptions",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "devportal",
+                "v3",
+                "subscriptions"
+              ]
+            },
+            "description": "Optional validation setup.\nAuth: bearer\nScopes: apim:subscribe",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin Policies",
+      "item": [
+        {
+          "name": "List subscription throttling policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/throttling/policies/subscription?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "throttling",
+                "policies",
+                "subscription"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Subscription tier to Kong rate-limiting.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        },
+        {
+          "name": "List application throttling policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/throttling/policies/application?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "throttling",
+                "policies",
+                "application"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Application-level policy inventory.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        },
+        {
+          "name": "List advanced throttling policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/throttling/policies/advanced?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "throttling",
+                "policies",
+                "advanced"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Resource/API policy inventory.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        },
+        {
+          "name": "List custom throttling policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/throttling/policies/custom?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "throttling",
+                "policies",
+                "custom"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Custom policy inventory.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin System",
+      "item": [
+        {
+          "name": "List key managers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/key-managers?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "key-managers"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Key manager inventory and resident KM mapping.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        },
+        {
+          "name": "Get key manager",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/key-managers/{{keyManagerId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "key-managers",
+                "{{keyManagerId}}"
+              ]
+            },
+            "description": "Key manager detail.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        },
+        {
+          "name": "List scopes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/scopes?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "scopes"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "OAuth scope inventory.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        },
+        {
+          "name": "List gateway environments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/api/am/admin/v4/environments?limit={{limit}}&offset={{offset}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "am",
+                "admin",
+                "v4",
+                "environments"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                },
+                {
+                  "key": "offset",
+                  "value": "{{offset}}"
+                }
+              ]
+            },
+            "description": "Deployment environment mapping.\nAuth: bearer\nScopes: apim:admin"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "SCIM Users",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Users?startIndex={{startIndex}}&count={{count}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Users"
+              ],
+              "query": [
+                {
+                  "key": "startIndex",
+                  "value": "{{startIndex}}"
+                },
+                {
+                  "key": "count",
+                  "value": "{{count}}"
+                }
+              ]
+            },
+            "description": "User inventory.\nAuth: bearer-or-basic-admin\nScopes: internal_user_mgt_list"
+          },
+          "response": []
+        },
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Users/{{userId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Users",
+                "{{userId}}"
+              ]
+            },
+            "description": "User detail.\nAuth: bearer-or-basic-admin\nScopes: internal_user_mgt_view"
+          },
+          "response": []
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Users",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Users"
+              ]
+            },
+            "description": "Optional provisioning.\nAuth: bearer-or-basic-admin\nScopes: internal_user_mgt_create",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Patch user",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Users/{{userId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Optional provisioning/update.\nAuth: bearer-or-basic-admin\nScopes: internal_user_mgt_update",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Users/{{userId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Optional cleanup.\nAuth: bearer-or-basic-admin\nScopes: internal_user_mgt_delete"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "SCIM Groups",
+      "item": [
+        {
+          "name": "List groups",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Groups?startIndex={{startIndex}}&count={{count}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Groups"
+              ],
+              "query": [
+                {
+                  "key": "startIndex",
+                  "value": "{{startIndex}}"
+                },
+                {
+                  "key": "count",
+                  "value": "{{count}}"
+                }
+              ]
+            },
+            "description": "Groups/roles inventory.\nAuth: bearer-or-basic-admin\nScopes: internal_group_mgt_list"
+          },
+          "response": []
+        },
+        {
+          "name": "Get group",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Groups/{{groupId}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Groups",
+                "{{groupId}}"
+              ]
+            },
+            "description": "Role/group detail.\nAuth: bearer-or-basic-admin\nScopes: internal_group_mgt_view"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "SCIM Roles",
+      "item": [
+        {
+          "name": "List roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{wso2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{wso2BaseUrl}}/scim2/Roles?startIndex={{startIndex}}&count={{count}}",
+              "host": [
+                "{{wso2BaseUrl}}"
+              ],
+              "path": [
+                "scim2",
+                "Roles"
+              ],
+              "query": [
+                {
+                  "key": "startIndex",
+                  "value": "{{startIndex}}"
+                },
+                {
+                  "key": "count",
+                  "value": "{{count}}"
+                }
+              ]
+            },
+            "description": "Roles inventory where supported by WSO2 IS/APIM build.\nAuth: bearer-or-basic-admin\nScopes: internal_role_mgt_view"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "wso2BaseUrl",
+      "value": "https://localhost:9443"
+    },
+    {
+      "key": "wso2Username",
+      "value": "admin"
+    },
+    {
+      "key": "wso2Password",
+      "value": "admin"
+    },
+    {
+      "key": "adminBasicAuth",
+      "value": "YWRtaW46YWRtaW4=",
+      "description": "base64(username:password). Replace for non-dev use."
+    },
+    {
+      "key": "wso2ClientId",
+      "value": ""
+    },
+    {
+      "key": "wso2ClientSecret",
+      "value": ""
+    },
+    {
+      "key": "clientBasicAuth",
+      "value": "",
+      "description": "base64(wso2ClientId:wso2ClientSecret). Filled by DCR test script."
+    },
+    {
+      "key": "inventoryScope",
+      "value": "apim:api_view apim:api_import_export apim:subscribe apim:app_manage apim:sub_manage apim:admin openid internal_user_mgt_list internal_user_mgt_view internal_user_mgt_create internal_user_mgt_update internal_user_mgt_delete"
+    },
+    {
+      "key": "gatewayClientBasicAuth",
+      "value": "",
+      "description": "base64(runtimeConsumerKey:runtimeConsumerSecret), used only for gateway validation token."
+    },
+    {
+      "key": "gatewayScope",
+      "value": ""
+    },
+    {
+      "key": "wso2AccessToken",
+      "value": ""
+    },
+    {
+      "key": "wso2GatewayToken",
+      "value": ""
+    },
+    {
+      "key": "lastGrantedScope",
+      "value": ""
+    },
+    {
+      "key": "limit",
+      "value": "50"
+    },
+    {
+      "key": "offset",
+      "value": "0"
+    },
+    {
+      "key": "startIndex",
+      "value": "1"
+    },
+    {
+      "key": "count",
+      "value": "50"
+    },
+    {
+      "key": "apiId",
+      "value": ""
+    },
+    {
+      "key": "apiProductId",
+      "value": ""
+    },
+    {
+      "key": "applicationId",
+      "value": ""
+    },
+    {
+      "key": "keyType",
+      "value": "PRODUCTION"
+    },
+    {
+      "key": "policyId",
+      "value": ""
+    },
+    {
+      "key": "certificateAlias",
+      "value": ""
+    },
+    {
+      "key": "keyManagerId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "groupId",
+      "value": ""
+    }
+  ]
+}
