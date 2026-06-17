@@ -11,8 +11,8 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:local}
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb+srv://java-app:LszhHwotDeKBfG3a@probestack-nonprod.hdggqx.mongodb.net/probestack-wso2-forgeshift?appName=Probestack-nonprod}
-      database: ${MONGODB_DATABASE:probestack-wso2-forgeshift}
+      uri: ${MONGODB_WSO2_URI:mongodb+srv://admin_db_user:HdhPLHmhHEhxSUTa@probestack-prod.mby902c.mongodb.net/probestack-forgeshift?appName=probestack-prod}
+      database: ${MONGODB_WSO2_DATABASE:probestack-wso2-forgeshift}
       auto-index-creation: true
   servlet:
     multipart:
