@@ -32,6 +32,7 @@ public class Wso2Properties {
     private String adminApiBase = "/api/am/admin/v4";
     private String devportalApiBase = "/api/am/devportal/v3";
     private String scimApiBase = "/scim2";
+    private String scimUsersPath = "/Users";
     private String tokenPath = "/oauth2/token";
 
     /** OAuth2 scope requested when calling the Publisher REST API. */

@@ -437,11 +437,19 @@ public class Wso2Client {
      * client (or we add a Basic-auth fallback later).
      */
     public List<Map<String, Object>> listUsers(String accessToken) {
-        return listScimPaginated(accessToken, props.getScimApiBase() + "/Users");
+        return listScimPaginated(accessToken, scimUsersResourcePath(), false);
+    }
+
+    /**
+     * Strict variant of {@link #listUsers(String)} for flows that must fail
+     * fast and let the service layer perform token invalidation/retry handling.
+     */
+    public List<Map<String, Object>> listUsersStrict(String accessToken) {
+        return listScimPaginated(accessToken, scimUsersResourcePath(), true);
     }
 
     /** SCIM 2.0 paginator. Keys: startIndex (1-based), count. Wrapper: Resources. */
-    private List<Map<String, Object>> listScimPaginated(String accessToken, String path) {
+    private List<Map<String, Object>> listScimPaginated(String accessToken, String path, boolean failFast) {
         Objects.requireNonNull(accessToken, "accessToken");
         int pageSize = props.getPageSize();
         int startIndex = 1;
@@ -479,13 +487,25 @@ public class Wso2Client {
             } catch (WebClientResponseException e) {
                 log.warn("WSO2 SCIM call to {} failed: status={} body={}",
                         path, e.getStatusCode(), e.getResponseBodyAsString());
+                if (failFast) throw e;
                 return all;
             } catch (Exception e) {
                 log.warn("WSO2 SCIM call to {} failed: {}", path, e.getMessage());
+                if (failFast) throw e;
                 return all;
             }
         }
         return all;
+    }
+
+    /**
+     * Builds the configured SCIM users resource path without hardcoding the
+     * WSO2 /Users segment in call sites.
+     */
+    private String scimUsersResourcePath() {
+        String base = props.getScimApiBase() != null ? props.getScimApiBase() : "";
+        String users = props.getScimUsersPath() != null ? props.getScimUsersPath() : "";
+        return base + users;
     }
 
     /**

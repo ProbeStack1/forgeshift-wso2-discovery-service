@@ -34,6 +34,9 @@ public class DiscoveryProperties {
     /** Per-tenant credential profiles collection (mirrors Apigee 'profiles'). */
     private String profilesCollection = "wso2_profiles";
 
+    /** Normalized WSO2 user profiles discovered for downstream user migration. */
+    private String userProfilesCollection = "wso2_user_profiles";
+
     /** Business-metadata collection for POST /wso2/assetinfo. */
     private String assetInfoCollection = "probestack_wso2_asset_info";
 

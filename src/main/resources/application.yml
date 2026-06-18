@@ -77,6 +77,8 @@ forgeshift:
     publisher-api-base: /api/am/publisher/v4
     admin-api-base: /api/am/admin/v4
     devportal-api-base: /api/am/devportal/v3
+    scim-api-base: /scim2
+    scim-users-path: /Users
     token-path: /oauth2/token
     publisher-scope: apim:api_view
     admin-scope: apim:admin
@@ -90,6 +92,7 @@ forgeshift:
     audit-collection: wso2_migration_audit_info
     organizations-collection: wso2_organizations
     profiles-collection: wso2_profiles
+    user-profiles-collection: wso2_user_profiles
     default-company-name: probestack
     parallel-thread-pool-size: ${FORGESHIFT_DISCOVERY_PARALLEL_DOWNLOADS:4}
     download-timeout-seconds: ${FORGESHIFT_DISCOVERY_DOWNLOAD_TIMEOUT_SECONDS:60}
