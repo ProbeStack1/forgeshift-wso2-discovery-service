@@ -3,6 +3,7 @@ package com.forgeshift.wso2discovery.client;
 import com.forgeshift.wso2discovery.config.Wso2Properties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -284,6 +285,14 @@ public class Wso2Client {
                     break;
                 }
             } catch (WebClientResponseException e) {
+                // Let an expired/revoked token (401) propagate so BaseDiscoveryService can
+                // invalidate the cached token and retry once with a fresh one — same self-heal
+                // listApis() gets for free. Swallowing it here turned a stale cached token into
+                // a silent empty list (e.g. apiproducts/applications showing 0 after a WSO2
+                // restart, until the 55-min token cache expired on its own).
+                if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                    throw e;
+                }
                 log.warn("WSO2 list call to {}?{}={} failed: status={} body={}",
                         path, extraKey, extraValue, e.getStatusCode(), e.getResponseBodyAsString());
                 return all;
@@ -331,6 +340,14 @@ public class Wso2Client {
                     break;
                 }
             } catch (WebClientResponseException e) {
+                // Let an expired/revoked token (401) propagate so BaseDiscoveryService can
+                // invalidate the cached token and retry once with a fresh one — same self-heal
+                // listApis() gets for free. Swallowing it here turned a stale cached token into
+                // a silent empty list (e.g. apiproducts/applications showing 0 after a WSO2
+                // restart, until the 55-min token cache expired on its own).
+                if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                    throw e;
+                }
                 log.warn("WSO2 list call to {} failed: status={} body={}",
                         path, e.getStatusCode(), e.getResponseBodyAsString());
                 return all;
