@@ -192,7 +192,8 @@ public class Wso2KongRoleMappingService {
                                                        Wso2RoleMappingEntryRequest entry) {
         String normalizedRole = normalize(entry.getWso2RoleName());
         Wso2KongRoleMappingDocument existing = repository.findByBusinessKey(
-                request.getCompanyName(), request.getWso2Tenant(), kongControlPlane(request), normalizedRole);
+                request.getCompanyName(), sourceGateway(request), targetGateway(request),
+                request.getWso2Tenant(), kongControlPlane(request), normalizedRole);
         String operationType = existing == null ? "CREATED" : "UPDATED";
         Wso2KongRoleMappingDocument document = buildDocument(request, entry, existing, normalizedRole);
         repository.upsert(document);
@@ -216,8 +217,8 @@ public class Wso2KongRoleMappingService {
         return Wso2KongRoleMappingDocument.builder()
                 .mappingId(existing != null ? existing.getMappingId() : "WSO2-KONG-MAP-" + UUID.randomUUID())
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .wso2Tenant(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .kongControlPlane(kongControlPlane(request))
@@ -226,8 +227,10 @@ public class Wso2KongRoleMappingService {
                 .kongRoleName(trim(entry.getKongRoleName()))
                 .scopeType(defaultIfBlank(entry.getScopeType(), "GLOBAL"))
                 .status(trim(entry.getStatus()).toUpperCase())
-                .createdBy(existing != null ? existing.getCreatedBy() : request.getUserEmail())
-                .createdDate(existing != null ? existing.getCreatedDate() : now)
+                .createdBy(existing != null && StringUtils.hasText(existing.getCreatedBy())
+                        ? existing.getCreatedBy() : request.getUserEmail())
+                .createdDate(existing != null && existing.getCreatedDate() != null
+                        ? existing.getCreatedDate() : now)
                 .updatedBy(request.getUserEmail())
                 .updatedDate(now)
                 .build();
@@ -238,7 +241,7 @@ public class Wso2KongRoleMappingService {
      */
     private Map<String, Wso2KongRoleMappingDocument> fetchMappings(Wso2RoleMappingResolveRequest request) {
         List<String> normalizedRoles = request.getWso2Roles().stream().map(this::normalize).collect(Collectors.toList());
-        return repository.findByNormalizedRoles(request.getCompanyName(), request.getWso2Tenant(),
+        return repository.findByNormalizedRoles(request.getCompanyName(), sourceGateway(request), targetGateway(request), request.getWso2Tenant(),
                         kongControlPlane(request), normalizedRoles)
                 .stream()
                 .collect(Collectors.toMap(Wso2KongRoleMappingDocument::getWso2RoleNameNormalized,
@@ -261,8 +264,8 @@ public class Wso2KongRoleMappingService {
         return Wso2RoleMappingResolveResponse.builder()
                 .requestTransactionId(request.getRequestTransactionId())
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .orgName(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .totalRequestedRoles(roles.size())
@@ -304,8 +307,8 @@ public class Wso2KongRoleMappingService {
         return Wso2RoleMappingUpsertResponse.builder()
                 .requestTransactionId(request.getRequestTransactionId())
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .orgName(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .totalRequested(results.size())
@@ -315,6 +318,34 @@ public class Wso2KongRoleMappingService {
                 .overallStatus(overallStatus(results.size(), failed))
                 .results(results)
                 .build();
+    }
+
+    /**
+     * Returns the caller-provided source gateway or the WSO2 default.
+     */
+    private String sourceGateway(Wso2RoleMappingUpsertRequest request) {
+        return StringUtils.hasText(request.getSourceGateway()) ? trim(request.getSourceGateway()) : SOURCE_GATEWAY;
+    }
+
+    /**
+     * Returns the caller-provided source gateway or the WSO2 default.
+     */
+    private String sourceGateway(Wso2RoleMappingResolveRequest request) {
+        return StringUtils.hasText(request.getSourceGateway()) ? trim(request.getSourceGateway()) : SOURCE_GATEWAY;
+    }
+
+    /**
+     * Returns the caller-provided target gateway or the Kong default.
+     */
+    private String targetGateway(Wso2RoleMappingUpsertRequest request) {
+        return StringUtils.hasText(request.getTargetGateway()) ? trim(request.getTargetGateway()) : TARGET_GATEWAY;
+    }
+
+    /**
+     * Returns the caller-provided target gateway or the Kong default.
+     */
+    private String targetGateway(Wso2RoleMappingResolveRequest request) {
+        return StringUtils.hasText(request.getTargetGateway()) ? trim(request.getTargetGateway()) : TARGET_GATEWAY;
     }
 
     /**

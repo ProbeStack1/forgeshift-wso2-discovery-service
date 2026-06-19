@@ -1,6 +1,5 @@
 package com.forgeshift.wso2discovery.service;
 
-import com.forgeshift.wso2discovery.client.KongAdminClient;
 import com.forgeshift.wso2discovery.domain.Wso2KongUserMigrationDocument;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationHistoryResponse;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationRequest;
@@ -30,8 +29,11 @@ public class Wso2KongUserMigrationService {
 
     private static final String SOURCE_GATEWAY = "wso2";
     private static final String TARGET_GATEWAY = "kong";
+    private static final String MIGRATION_DISABLED_REASON =
+            "Kong user migration is not enabled. IDP is not configured to migrate WSO2 users to Kong.";
+    private static final String INVALID_MAPPING_REASON =
+            "Creation failed due to invalid role mapping. Kong role is required for migration.";
 
-    private final KongAdminClient kongAdminClient;
     private final Wso2KongUserMigrationRepository repository;
 
     /**
@@ -129,32 +131,31 @@ public class Wso2KongUserMigrationService {
     }
 
     /**
-     * Creates/updates a Kong consumer and assigns one Kong role/group.
+     * Builds a demo-safe result for one user-role assignment without invoking
+     * Kong Admin API until IDP and migration configuration are finalized.
      */
     private Wso2UserMigrationResult processSingleAssignment(Wso2UserMigrationUserRequest user,
                                                             Wso2UserMigrationRoleRequest role) {
-        try {
-            kongAdminClient.upsertConsumer(user.getUserName(), user.getUserEmail());
-            kongAdminClient.assignRole(user.getUserName(), role.getKongRoleName());
-            return Wso2UserMigrationResult.builder()
-                    .userName(user.getUserName())
-                    .userEmail(user.getUserEmail())
-                    .wso2RoleName(role.getWso2RoleName())
-                    .kongRoleName(role.getKongRoleName())
-                    .migrationStatus("SUCCESS")
-                    .assignmentStatus("SUCCESS")
-                    .build();
-        } catch (Exception ex) {
-            return Wso2UserMigrationResult.builder()
-                    .userName(user.getUserName())
-                    .userEmail(user.getUserEmail())
-                    .wso2RoleName(role.getWso2RoleName())
-                    .kongRoleName(role.getKongRoleName())
-                    .migrationStatus("FAILED")
-                    .assignmentStatus("FAILED")
-                    .errorMessage(sanitize(ex.getMessage()))
-                    .build();
+        String errorMessage = migrationErrorMessage(role);
+        return Wso2UserMigrationResult.builder()
+                .userName(user.getUserName())
+                .userEmail(user.getUserEmail())
+                .wso2RoleName(role.getWso2RoleName())
+                .kongRoleName(role.getKongRoleName())
+                .migrationStatus("FAILED")
+                .assignmentStatus("FAILED")
+                .errorMessage(errorMessage)
+                .build();
+    }
+
+    /**
+     * Returns the most useful user-facing failure reason for the assignment.
+     */
+    private String migrationErrorMessage(Wso2UserMigrationRoleRequest role) {
+        if (role == null || !StringUtils.hasText(role.getKongRoleName())) {
+            return INVALID_MAPPING_REASON;
         }
+        return MIGRATION_DISABLED_REASON;
     }
 
     /**
@@ -201,8 +202,8 @@ public class Wso2KongUserMigrationService {
                 .id(id)
                 .migrationId("WSO2-KONG-MIG-" + UUID.randomUUID())
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .wso2Tenant(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .requestTransactionId(request.getRequestTransactionId())
@@ -232,8 +233,8 @@ public class Wso2KongUserMigrationService {
         return Wso2UserMigrationResponse.builder()
                 .requestTransactionId(request.getRequestTransactionId())
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .orgName(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .totalRequested(results.size())
@@ -243,6 +244,20 @@ public class Wso2KongUserMigrationService {
                 .overallStatus(overallStatus(results.size(), failed))
                 .results(results)
                 .build();
+    }
+
+    /**
+     * Returns the caller-provided source gateway or the WSO2 default.
+     */
+    private String sourceGateway(Wso2UserMigrationRequest request) {
+        return StringUtils.hasText(request.getSourceGateway()) ? request.getSourceGateway().trim() : SOURCE_GATEWAY;
+    }
+
+    /**
+     * Returns the caller-provided target gateway or the Kong default.
+     */
+    private String targetGateway(Wso2UserMigrationRequest request) {
+        return StringUtils.hasText(request.getTargetGateway()) ? request.getTargetGateway().trim() : TARGET_GATEWAY;
     }
 
     /**

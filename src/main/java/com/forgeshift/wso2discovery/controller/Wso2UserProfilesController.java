@@ -43,5 +43,11 @@ public class Wso2UserProfilesController {
         if (!StringUtils.hasText(request.getCompanyName())) {
             request.setCompanyName(discoveryProperties.getDefaultCompanyName());
         }
+        if (!StringUtils.hasText(request.getSourceGateway())) {
+            request.setSourceGateway("wso2");
+        }
+        if (!StringUtils.hasText(request.getTargetGateway())) {
+            request.setTargetGateway("kong-konnect");
+        }
     }
 }

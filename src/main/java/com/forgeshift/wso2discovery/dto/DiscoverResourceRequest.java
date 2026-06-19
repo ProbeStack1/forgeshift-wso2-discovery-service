@@ -15,6 +15,12 @@ public class DiscoverResourceRequest {
     /** Multi-tenancy identifier of the caller. Defaults to "probestack" if omitted. */
     private String companyName;
 
+    /** Source gateway identifier for cross-service tracking, for example "wso2". */
+    private String sourceGateway;
+
+    /** Target gateway identifier for cross-service tracking, for example "kong-konnect". */
+    private String targetGateway;
+
     /** WSO2 tenant to discover (e.g. "carbon.super"). */
     @NotBlank
     private String wso2Tenant;

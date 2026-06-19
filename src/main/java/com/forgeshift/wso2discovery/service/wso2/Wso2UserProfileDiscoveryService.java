@@ -300,8 +300,8 @@ public class Wso2UserProfileDiscoveryService {
         return Wso2UserProfileDocument.builder()
                 .id(documentId(request, profile.getUserName()))
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .wso2Tenant(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .requestTransactionId(request.getRequestTransactionId())
@@ -344,8 +344,8 @@ public class Wso2UserProfileDiscoveryService {
                                                            List<Wso2UserProfileDocument> documents) {
         return Wso2UserProfileDiscoveryResponse.builder()
                 .companyName(request.getCompanyName())
-                .sourceGateway(SOURCE_GATEWAY)
-                .targetGateway(TARGET_GATEWAY)
+                .sourceGateway(sourceGateway(request))
+                .targetGateway(targetGateway(request))
                 .orgName(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .requestTransactionId(request.getRequestTransactionId())
@@ -354,6 +354,20 @@ public class Wso2UserProfileDiscoveryService {
                 .totalRoles(totalUniqueRoles(documents))
                 .users(documents.stream().map(this::toDetail).collect(Collectors.toList()))
                 .build();
+    }
+
+    /**
+     * Returns the caller-provided source gateway or the WSO2 default.
+     */
+    private String sourceGateway(Wso2UserProfileDiscoveryRequest request) {
+        return StringUtils.hasText(request.getSourceGateway()) ? request.getSourceGateway() : SOURCE_GATEWAY;
+    }
+
+    /**
+     * Returns the caller-provided target gateway or the Kong default.
+     */
+    private String targetGateway(Wso2UserProfileDiscoveryRequest request) {
+        return StringUtils.hasText(request.getTargetGateway()) ? request.getTargetGateway() : TARGET_GATEWAY;
     }
 
     /**
