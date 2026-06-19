@@ -494,6 +494,14 @@ public class Wso2Client {
                     break;
                 }
             } catch (WebClientResponseException e) {
+                // Same self-heal as the other paginators: let a 401 propagate so
+                // BaseDiscoveryService invalidates the cached token and retries once.
+                // (For SCIM a persistent 401 can also mean the OAuth client lacks the
+                // SCIM scope — see the listUsers() javadoc — in which case surfacing the
+                // error beats silently reporting 0 users.)
+                if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                    throw e;
+                }
                 log.warn("WSO2 SCIM call to {} failed: status={} body={}",
                         path, e.getStatusCode(), e.getResponseBodyAsString());
                 return all;
