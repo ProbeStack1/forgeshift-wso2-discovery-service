@@ -80,6 +80,27 @@ forgeshift:
     scim-api-base: /scim2
     scim-users-path: /Users
     token-path: /oauth2/token
+    soap:
+      user-store-service-path: ${WSO2_SOAP_USER_STORE_SERVICE_PATH:/services/RemoteUserStoreManagerService}
+      user-admin-service-path: ${WSO2_SOAP_USER_ADMIN_SERVICE_PATH:/services/UserAdmin}
+      namespace: ${WSO2_SOAP_NAMESPACE:http://service.ws.um.carbon.wso2.org}
+      user-admin-namespace: ${WSO2_SOAP_USER_ADMIN_NAMESPACE:http://org.apache.axis2/xsd}
+      user-filter: ${WSO2_SOAP_USER_FILTER:*}
+      max-users: ${WSO2_SOAP_MAX_USERS:100}
+      profile-name: ${WSO2_SOAP_PROFILE_NAME:default}
+      email-claim: ${WSO2_SOAP_EMAIL_CLAIM:http://wso2.org/claims/emailaddress}
+      first-name-claim: ${WSO2_SOAP_FIRST_NAME_CLAIM:http://wso2.org/claims/givenname}
+      last-name-claim: ${WSO2_SOAP_LAST_NAME_CLAIM:http://wso2.org/claims/lastname}
+      include-role-permissions: ${WSO2_SOAP_INCLUDE_ROLE_PERMISSIONS:false}
+      user-discovery-parallelism: ${WSO2_SOAP_USER_DISCOVERY_PARALLELISM:10}
+      role-permission-parallelism: ${WSO2_SOAP_ROLE_PERMISSION_PARALLELISM:5}
+      max-role-permissions-per-role: ${WSO2_SOAP_MAX_ROLE_PERMISSIONS_PER_ROLE:10}
+    kong:
+      base-url: ${KONG_ADMIN_BASE_URL:}
+      admin-token: ${KONG_ADMIN_TOKEN:}
+      consumer-path: ${KONG_CONSUMER_PATH:/consumers}
+      acl-path-template: ${KONG_ACL_PATH_TEMPLATE:/consumers/{consumer}/acls}
+      request-timeout-seconds: ${KONG_REQUEST_TIMEOUT_SECONDS:30}
     publisher-scope: apim:api_view
     admin-scope: apim:admin
     devportal-scope: apim:subscribe
@@ -93,6 +114,8 @@ forgeshift:
     organizations-collection: wso2_organizations
     profiles-collection: wso2_profiles
     user-profiles-collection: wso2_user_profiles
+    user-role-mappings-collection: wso2_kong_role_mapping
+    user-migration-collection: wso2_kong_user_migration
     default-company-name: probestack
     parallel-thread-pool-size: ${FORGESHIFT_DISCOVERY_PARALLEL_DOWNLOADS:4}
     download-timeout-seconds: ${FORGESHIFT_DISCOVERY_DOWNLOAD_TIMEOUT_SECONDS:60}

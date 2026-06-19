@@ -34,6 +34,8 @@ public class Wso2Properties {
     private String scimApiBase = "/scim2";
     private String scimUsersPath = "/Users";
     private String tokenPath = "/oauth2/token";
+    private Soap soap = new Soap();
+    private Kong kong = new Kong();
 
     /** OAuth2 scope requested when calling the Publisher REST API. */
     private String publisherScope = "apim:api_view";
@@ -73,5 +75,38 @@ public class Wso2Properties {
             sb.append(devportalScope);
         }
         return sb.toString();
+    }
+
+    /**
+     * SOAP admin-service settings used for WSO2 user and role discovery.
+     */
+    @Data
+    public static class Soap {
+        private String userStoreServicePath = "/services/RemoteUserStoreManagerService";
+        private String userAdminServicePath = "/services/UserAdmin";
+        private String namespace = "http://service.ws.um.carbon.wso2.org";
+        private String userAdminNamespace = "http://org.apache.axis2/xsd";
+        private String userFilter = "*";
+        private int maxUsers = 100;
+        private String profileName = "default";
+        private String emailClaim = "http://wso2.org/claims/emailaddress";
+        private String firstNameClaim = "http://wso2.org/claims/givenname";
+        private String lastNameClaim = "http://wso2.org/claims/lastname";
+        private boolean includeRolePermissions = false;
+        private int userDiscoveryParallelism = 10;
+        private int rolePermissionParallelism = 5;
+        private int maxRolePermissionsPerRole = 10;
+    }
+
+    /**
+     * Kong Admin API settings used by the WSO2-to-Kong migration endpoint.
+     */
+    @Data
+    public static class Kong {
+        private String baseUrl;
+        private String adminToken;
+        private String consumerPath = "/consumers";
+        private String aclPathTemplate = "/consumers/{consumer}/acls";
+        private int requestTimeoutSeconds = 30;
     }
 }

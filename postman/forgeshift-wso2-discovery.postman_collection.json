@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "f0c1e2d3-4b5a-6c7d-8e9f-0a1b2c3d4e5f",
     "name": "Forgeshift WSO2 Discovery Service",
-    "description": "Every REST endpoint exposed by the forgeshift-wso2-discovery-service. The per-resource POSTs run a synchronous discovery for one WSO2 resource type and write a snapshot to MongoDB. The /discoveries endpoints orchestrate a bulk fan-out job. Only POST /wso2/apis is fully implemented; the rest are reserved templates that already accept the same request body once their service backend lands.\n\nDefault environment targets http://localhost:8081/discovery/v1. Switch via the `baseUrl` collection variable or attach a Postman environment.\n\nCollection variables:\n- baseUrl                Base URL including the context path (default: http://localhost:8081/discovery/v1)\n- companyName            Multi-tenancy partner id (default: probestack)\n- wso2Tenant             WSO2 tenant to discover (default: carbon.super)\n- userEmail              Audit field, free-form (default: ops@local)\n- jobId                  Captured from POST /discoveries response\n- discoveryId            Captured from POST /wso2/* response (= requestTransactionId of the most recent discovery)\n- requestTransactionId   Auto-generated Apigee-style id by the collection pre-request script before every request. Format: <4-char-prefix>_<companyName>_<wso2Tenant>_<yyyyMMddHHmmssSSS>. Backend requires this on every discovery POST.",
+    "description": "Every REST endpoint exposed by the forgeshift-wso2-discovery-service. The per-resource POSTs run a synchronous discovery for one WSO2 resource type and write a snapshot to MongoDB. The /discoveries endpoints orchestrate a bulk fan-out job. The WSO2 to Kong user migration folder exposes REST APIs for the UI while the backend uses WSO2 SOAP internally.\n\nDefault environment targets http://localhost:8081/wso2/discovery/v1. Switch via the `baseUrl` collection variable or attach a Postman environment.\n\nCollection variables:\n- baseUrl                Base URL including the context path (default: http://localhost:8081/wso2/discovery/v1)\n- companyName            Multi-tenancy partner id (default: probestack)\n- wso2Tenant             WSO2 tenant to discover (default: carbon.super)\n- userEmail              Audit field, free-form (default: ops@local)\n- kongControlPlane       Logical Kong target/control plane name (default: default)\n- wso2RoleName           Sample WSO2 role to map/resolve\n- kongRoleName           Sample Kong role/group to assign\n- jobId                  Captured from POST /discoveries response\n- discoveryId            Captured from discovery responses (= requestTransactionId of the most recent discovery)\n- requestTransactionId   Auto-generated Apigee-style id by the collection pre-request script before every request. Format: <4-char-prefix>_<companyName>_<wso2Tenant>_<yyyyMMddHHmmssSSS>. Backend requires this on every discovery POST.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -51,12 +51,17 @@
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:8081/discovery/v1", "type": "string" },
+    { "key": "baseUrl", "value": "http://localhost:8081/wso2/discovery/v1", "type": "string" },
     { "key": "companyName", "value": "probestack", "type": "string" },
     { "key": "wso2Tenant", "value": "carbon.super", "type": "string" },
     { "key": "profileName", "value": "primary", "type": "string" },
     { "key": "userEmail", "value": "ops@local", "type": "string" },
     { "key": "environment", "value": "", "type": "string" },
+    { "key": "kongControlPlane", "value": "default", "type": "string" },
+    { "key": "wso2RoleName", "value": "Internal/subscriber", "type": "string" },
+    { "key": "kongRoleName", "value": "kong-subscriber", "type": "string" },
+    { "key": "migrationUserName", "value": "admin", "type": "string" },
+    { "key": "migrationUserEmail", "value": "admin@example.com", "type": "string" },
     { "key": "jobId", "value": "", "type": "string" },
     { "key": "discoveryId", "value": "", "type": "string" },
     { "key": "sourceDiscoveryId", "value": "", "type": "string" },
@@ -997,6 +1002,169 @@
               ]
             },
             "description": "Which applications subscribe to this API?"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "WSO2 to Kong User Migration",
+      "description": "End-to-end REST workflow for WSO2 user migration to Kong. These requests call this Spring Boot service only; the service calls WSO2 SOAP internally for user lookup.",
+      "item": [
+        {
+          "name": "1. POST /users/discovery  (SOAP-backed user lookup)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('discovery request completed', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "if (json.requestTransactionId) {",
+                  "    pm.collectionVariables.set('discoveryId', json.requestTransactionId);",
+                  "}",
+                  "if (json.users && json.users.length > 0) {",
+                  "    const user = json.users[0];",
+                  "    if (user.userName) pm.collectionVariables.set('migrationUserName', user.userName);",
+                  "    if (user.userEmail) pm.collectionVariables.set('migrationUserEmail', user.userEmail);",
+                  "    if (user.roles && user.roles.length > 0 && user.roles[0].roleName) {",
+                  "        pm.collectionVariables.set('wso2RoleName', user.roles[0].roleName);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"{{companyName}}\",\n  \"wso2Tenant\": \"{{wso2Tenant}}\",\n  \"environment\": \"{{environment}}\",\n  \"requestTransactionId\": \"{{requestTransactionId}}\",\n  \"userEmail\": \"{{userEmail}}\",\n  \"notes\": \"SOAP-backed WSO2 user discovery for Kong migration\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/discovery",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "discovery"]
+            },
+            "description": "Discovers WSO2 users through the backend REST API. The backend uses SOAP Basic Auth internally against RemoteUserStoreManagerService for users, claims, and user roles, and UserAdmin for role permissions. It stores normalized documents in `wso2_user_profiles` and returns a migration-ready JSON response.\n\nRole response shape:\n```json\n{\n  \"roleName\": \"Internal/creator\",\n  \"permissions\": [\n    {\n      \"resourcePath\": \"/permission/admin/login\",\n      \"selected\": true\n    }\n  ]\n}\n```\n\nThe UI should call this REST endpoint only; direct SOAP requests are for backend troubleshooting."
+          },
+          "response": [
+            {
+              "name": "Example success with role permissions",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Accept", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"companyName\": \"{{companyName}}\",\n  \"wso2Tenant\": \"{{wso2Tenant}}\",\n  \"environment\": \"{{environment}}\",\n  \"requestTransactionId\": \"{{requestTransactionId}}\",\n  \"userEmail\": \"{{userEmail}}\",\n  \"notes\": \"SOAP-backed WSO2 user discovery for Kong migration\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/users/discovery",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["users", "discovery"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"requestTransactionId\": \"{{requestTransactionId}}\",\n  \"companyName\": \"probestack\",\n  \"sourceGateway\": \"wso2\",\n  \"targetGateway\": \"kong\",\n  \"orgName\": \"carbon.super\",\n  \"environment\": \"dev\",\n  \"totalUsers\": 1,\n  \"totalRoles\": 1,\n  \"discoveryStatus\": \"COMPLETED\",\n  \"users\": [\n    {\n      \"userEmail\": \"api.developer@probestack.io\",\n      \"firstName\": \"API\",\n      \"lastName\": \"Developer\",\n      \"userName\": \"api.developer\",\n      \"roles\": [\n        {\n          \"roleName\": \"Internal/creator\",\n          \"permissions\": [\n            {\n              \"resourcePath\": \"/permission/admin/login\",\n              \"selected\": true\n            },\n            {\n              \"resourcePath\": \"/permission/admin/manage/api\",\n              \"selected\": true\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "2. POST /role-mappings  (create/update mapping)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"{{companyName}}\",\n  \"wso2Tenant\": \"{{wso2Tenant}}\",\n  \"environment\": \"{{environment}}\",\n  \"requestTransactionId\": \"{{requestTransactionId}}\",\n  \"userEmail\": \"{{userEmail}}\",\n  \"kongControlPlane\": \"{{kongControlPlane}}\",\n  \"roleMappings\": [\n    {\n      \"wso2RoleName\": \"{{wso2RoleName}}\",\n      \"kongRoleName\": \"{{kongRoleName}}\",\n      \"scopeType\": \"GLOBAL\",\n      \"status\": \"ACTIVE\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/role-mappings",
+              "host": ["{{baseUrl}}"],
+              "path": ["role-mappings"]
+            },
+            "description": "Creates or updates WSO2 role to Kong role/group mapping rules in `wso2_kong_role_mapping`. This does not fetch WSO2 users and does not call Kong."
+          },
+          "response": []
+        },
+        {
+          "name": "3. POST /role-mappings/resolve  (check mapping readiness)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"{{companyName}}\",\n  \"wso2Tenant\": \"{{wso2Tenant}}\",\n  \"environment\": \"{{environment}}\",\n  \"requestTransactionId\": \"{{requestTransactionId}}\",\n  \"userEmail\": \"{{userEmail}}\",\n  \"kongControlPlane\": \"{{kongControlPlane}}\",\n  \"wso2Roles\": [\n    \"{{wso2RoleName}}\",\n    \"Internal/publisher\",\n    \"admin\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/role-mappings/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["role-mappings", "resolve"]
+            },
+            "description": "Checks whether discovered WSO2 roles have active Kong mappings. Returns MAPPED, MAPPING_REQUIRED, or INACTIVE_MAPPING. This is read-only and does not call Kong."
+          },
+          "response": []
+        },
+        {
+          "name": "4. POST /users/migration  (create Kong users and assign roles)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"{{companyName}}\",\n  \"wso2Tenant\": \"{{wso2Tenant}}\",\n  \"environment\": \"{{environment}}\",\n  \"requestTransactionId\": \"{{requestTransactionId}}\",\n  \"userEmail\": \"{{userEmail}}\",\n  \"kongControlPlane\": \"{{kongControlPlane}}\",\n  \"users\": [\n    {\n      \"userName\": \"{{migrationUserName}}\",\n      \"userEmail\": \"{{migrationUserEmail}}\",\n      \"firstName\": \"Demo\",\n      \"lastName\": \"User\",\n      \"roles\": [\n        {\n          \"wso2RoleName\": \"{{wso2RoleName}}\",\n          \"kongRoleName\": \"{{kongRoleName}}\"\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/migration",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "migration"]
+            },
+            "description": "Migrates selected users to Kong by creating/updating Kong consumers and assigning mapped Kong roles/groups. Requires backend Kong config: `KONG_ADMIN_BASE_URL` and optional `KONG_ADMIN_TOKEN`. Stores per user-role status in `wso2_kong_user_migration`."
+          },
+          "response": []
+        },
+        {
+          "name": "5. GET /users/migration/history",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/users/migration/history?companyName={{companyName}}&wso2Tenant={{wso2Tenant}}&environment={{environment}}&requestTransactionId={{requestTransactionId}}&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "migration", "history"],
+              "query": [
+                { "key": "companyName", "value": "{{companyName}}" },
+                { "key": "wso2Tenant", "value": "{{wso2Tenant}}" },
+                { "key": "environment", "value": "{{environment}}" },
+                { "key": "requestTransactionId", "value": "{{requestTransactionId}}" },
+                { "key": "limit", "value": "50" }
+              ]
+            },
+            "description": "Returns migration status history from `wso2_kong_user_migration`, including users, WSO2 roles, Kong roles/groups, assignment status, and errors."
           },
           "response": []
         }

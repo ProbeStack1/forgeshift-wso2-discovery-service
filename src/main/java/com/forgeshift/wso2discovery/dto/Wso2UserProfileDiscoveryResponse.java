@@ -15,15 +15,13 @@ import java.util.List;
 public class Wso2UserProfileDiscoveryResponse {
 
     private String companyName;
-    private String wso2Tenant;
+    private String sourceGateway;
+    private String targetGateway;
+    private String orgName;
     private String environment;
     private String requestTransactionId;
     private String discoveryStatus;
     private int totalUsers;
     private int totalRoles;
-    private String collectionName;
-    private List<String> documentIds;
     private List<Wso2UserProfileDetail> users;
-    private String timestamp;
-    private long elapsedMs;
 }

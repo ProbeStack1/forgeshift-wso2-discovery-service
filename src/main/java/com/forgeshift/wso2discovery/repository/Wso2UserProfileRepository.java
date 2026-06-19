@@ -53,6 +53,8 @@ public class Wso2UserProfileRepository {
         Update update = new Update()
                 .setOnInsert("createdDate", document.getCreatedDate() != null ? document.getCreatedDate() : now)
                 .set("companyName", document.getCompanyName())
+                .set("sourceGateway", document.getSourceGateway())
+                .set("targetGateway", document.getTargetGateway())
                 .set("wso2Tenant", document.getWso2Tenant())
                 .set("environment", document.getEnvironment())
                 .set("requestTransactionId", document.getRequestTransactionId())
@@ -66,6 +68,8 @@ public class Wso2UserProfileRepository {
                 .set("active", document.getActive())
                 .set("userType", document.getUserType())
                 .set("roles", document.getRoles())
+                .set("rolePermissions", document.getRolePermissions())
+                .set("errorMessage", document.getErrorMessage())
                 .set("rawPayload", document.getRawPayload())
                 .set("requestedBy", document.getRequestedBy())
                 .set("updatedDate", now);

@@ -20,6 +20,7 @@ public class Wso2UserProfileDetail {
 
     private String sourceUserId;
     private String userName;
+    private String userEmail;
     private String firstName;
     private String lastName;
     private String displayName;
@@ -27,5 +28,5 @@ public class Wso2UserProfileDetail {
     private List<String> emails;
     private Boolean active;
     private String userType;
-    private List<String> roles;
+    private List<Wso2DiscoveredUserRole> roles;
 }

@@ -25,9 +25,9 @@ public class Wso2UserProfilesController {
     private final DiscoveryProperties discoveryProperties;
 
     /**
-     * Discovers WSO2 SCIM user profiles and persists normalized migration-ready documents.
+     * Discovers WSO2 user profiles through SOAP and persists normalized migration-ready documents.
      */
-    @PostMapping("/user-profiles")
+    @PostMapping({"/users/discovery", "/user-profiles"})
     public ResponseEntity<Wso2UserProfileDiscoveryResponse> discoverUserProfiles(
             @Valid @RequestBody Wso2UserProfileDiscoveryRequest request) {
         applyDefaults(request);

@@ -1,23 +1,20 @@
 package com.forgeshift.wso2discovery.service.wso2;
 
-import com.forgeshift.wso2discovery.client.Wso2Client;
+import com.forgeshift.wso2discovery.client.Wso2Credentials;
+import com.forgeshift.wso2discovery.client.Wso2UserStoreSoapClient;
 import com.forgeshift.wso2discovery.config.Wso2Properties;
 import com.forgeshift.wso2discovery.domain.Wso2UserProfileDocument;
+import com.forgeshift.wso2discovery.dto.Wso2RolePermissionDetail;
 import com.forgeshift.wso2discovery.dto.Wso2UserProfileDiscoveryRequest;
 import com.forgeshift.wso2discovery.dto.Wso2UserProfileDiscoveryResponse;
 import com.forgeshift.wso2discovery.repository.Wso2UserProfileRepository;
-import com.forgeshift.wso2discovery.service.Wso2TokenService;
+import com.forgeshift.wso2discovery.service.Wso2TenantProfileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -25,57 +22,80 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 /**
- * Unit tests for normalized WSO2 SCIM user-profile discovery orchestration.
+ * Unit tests for SOAP-based WSO2 user-profile discovery orchestration.
  */
 @ExtendWith(MockitoExtension.class)
 class Wso2UserProfileDiscoveryServiceTest {
 
     @Mock
-    private Wso2Client wso2Client;
+    private Wso2UserStoreSoapClient soapClient;
 
     @Mock
-    private Wso2TokenService tokenService;
+    private Wso2TenantProfileService tenantProfileService;
 
     @Mock
     private Wso2UserProfileRepository repository;
 
+    private Wso2Credentials credentials;
+    private Wso2Properties properties;
     private Wso2UserProfileDiscoveryService service;
 
     @BeforeEach
     void setUp() {
-        Wso2Properties properties = new Wso2Properties();
-        properties.setAdminScope("apim:admin");
-        service = new Wso2UserProfileDiscoveryService(wso2Client, tokenService, properties, repository);
+        properties = new Wso2Properties();
+        credentials = Wso2Credentials.builder()
+                .baseUrl("https://wso2.local:9443")
+                .username("admin")
+                .password("admin")
+                .build();
+        service = new Wso2UserProfileDiscoveryService(soapClient, tenantProfileService, properties, repository);
     }
 
     @Test
-    void discoverUserProfiles_normalizesAndStoresUsers() {
+    void discoverUserProfiles_fetchesSoapUsersRolesClaimsAndStoresDocuments() {
+        properties.getSoap().setIncludeRolePermissions(true);
         Wso2UserProfileDiscoveryRequest request = validRequest();
-        when(tokenService.getToken("apim:admin", "probestack", "carbon.super")).thenReturn("token");
-        when(wso2Client.listUsersStrict("token")).thenReturn(List.of(scimUser()));
+        when(tenantProfileService.resolve("probestack", "carbon.super")).thenReturn(credentials);
+        when(soapClient.listUsers(credentials)).thenReturn(List.of("alice"));
+        when(soapClient.getRoleListOfUser(credentials, "alice")).thenReturn(List.of("Internal/admin", "creator"));
+        when(soapClient.getUserClaimValues(credentials, "alice")).thenReturn(Map.of(
+                "http://wso2.org/claims/emailaddress", "alice@example.com",
+                "http://wso2.org/claims/givenname", "Alice",
+                "http://wso2.org/claims/lastname", "Smith"));
+        when(soapClient.getRolePermissions(credentials, "Internal/admin")).thenReturn(List.of(permission("/permission/admin/login", true)));
+        when(soapClient.getRolePermissions(credentials, "creator")).thenReturn(List.of(permission("/permission/admin/manage/api", true)));
         when(repository.upsertAll(any())).thenReturn(List.of("doc-1"));
-        when(repository.collectionName()).thenReturn("wso2_user_profiles");
 
         Wso2UserProfileDiscoveryResponse response = service.discoverUserProfiles(request);
 
         assertEquals("COMPLETED", response.getDiscoveryStatus());
+        assertEquals("wso2", response.getSourceGateway());
+        assertEquals("kong", response.getTargetGateway());
+        assertEquals("carbon.super", response.getOrgName());
         assertEquals(1, response.getTotalUsers());
         assertEquals(2, response.getTotalRoles());
-        assertEquals("wso2_user_profiles", response.getCollectionName());
-        assertEquals("alice@example.com", response.getUsers().get(0).getPrimaryEmail());
-        assertEquals(List.of("Internal/admin", "creator"), response.getUsers().get(0).getRoles());
+        assertEquals("alice@example.com", response.getUsers().get(0).getUserEmail());
+        assertEquals("Internal/admin", response.getUsers().get(0).getRoles().get(0).getRoleName());
+        assertEquals("/permission/admin/login", response.getUsers().get(0).getRoles().get(0).getPermissions().get(0).getResourcePath());
+        assertTrue(response.getUsers().get(0).getRoles().get(0).getPermissions().get(0).getSelected());
 
         ArgumentCaptor<List<Wso2UserProfileDocument>> captor = ArgumentCaptor.forClass(List.class);
         verify(repository).upsertAll(captor.capture());
         Wso2UserProfileDocument document = captor.getValue().get(0);
-        assertTrue(document.getId().contains("probestack|carbon.super|user-profiles|user-1|tx-123"));
+        assertTrue(document.getId().contains("probestack|carbon.super|user-profiles|alice|tx-123"));
         assertEquals("Alice", document.getFirstName());
         assertEquals("Smith", document.getLastName());
+        assertEquals("wso2", document.getSourceGateway());
+        assertEquals("kong", document.getTargetGateway());
+        assertEquals("/permission/admin/login",
+                document.getRolePermissions().get("Internal/admin").get(0).getResourcePath());
     }
 
     @Test
@@ -101,34 +121,91 @@ class Wso2UserProfileDiscoveryServiceTest {
     }
 
     @Test
-    void discoverUserProfiles_retriesOnceAfterUnauthorized() {
+    void discoverUserProfiles_userRoleFailureContinuesWithPartialUser() {
         Wso2UserProfileDiscoveryRequest request = validRequest();
-        when(tokenService.getToken("apim:admin", "probestack", "carbon.super"))
-                .thenReturn("expired")
-                .thenReturn("fresh");
-        when(wso2Client.listUsersStrict("expired")).thenThrow(unauthorized());
-        when(wso2Client.listUsersStrict("fresh")).thenReturn(List.of(scimUser()));
+        when(tenantProfileService.resolve("probestack", "carbon.super")).thenReturn(credentials);
+        when(soapClient.listUsers(credentials)).thenReturn(List.of("alice"));
+        when(soapClient.getRoleListOfUser(credentials, "alice")).thenThrow(new RuntimeException("403"));
+        when(soapClient.getUserClaimValues(credentials, "alice")).thenReturn(Map.of(
+                "http://wso2.org/claims/emailaddress", "alice@example.com"));
         when(repository.upsertAll(any())).thenReturn(List.of("doc-1"));
-        when(repository.collectionName()).thenReturn("wso2_user_profiles");
 
         Wso2UserProfileDiscoveryResponse response = service.discoverUserProfiles(request);
 
         assertEquals(1, response.getTotalUsers());
-        verify(tokenService).invalidate("probestack", "carbon.super", "apim:admin");
-        verify(wso2Client).listUsersStrict("fresh");
+        assertEquals(0, response.getTotalRoles());
+        ArgumentCaptor<List<Wso2UserProfileDocument>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository).upsertAll(captor.capture());
+        assertTrue(captor.getValue().get(0).getErrorMessage().contains("Role lookup failed"));
     }
 
     @Test
     void discoverUserProfiles_mongoSaveFailureFailsRequest() {
         Wso2UserProfileDiscoveryRequest request = validRequest();
-        when(tokenService.getToken("apim:admin", "probestack", "carbon.super")).thenReturn("token");
-        when(wso2Client.listUsersStrict("token")).thenReturn(List.of(scimUser()));
+        when(tenantProfileService.resolve("probestack", "carbon.super")).thenReturn(credentials);
+        when(soapClient.listUsers(credentials)).thenReturn(List.of("alice"));
+        when(soapClient.getRoleListOfUser(credentials, "alice")).thenReturn(List.of("Internal/admin"));
+        when(soapClient.getUserClaimValues(credentials, "alice")).thenReturn(Map.of());
         when(repository.upsertAll(any())).thenThrow(new RuntimeException("mongo down"));
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> service.discoverUserProfiles(request));
 
         assertTrue(exception.getMessage().contains("Failed to store WSO2 user profiles"));
+    }
+
+    @Test
+    void discoverUserProfiles_rolePermissionFailureContinuesWithEmptyPermissions() {
+        properties.getSoap().setIncludeRolePermissions(true);
+        Wso2UserProfileDiscoveryRequest request = validRequest();
+        when(tenantProfileService.resolve("probestack", "carbon.super")).thenReturn(credentials);
+        when(soapClient.listUsers(credentials)).thenReturn(List.of("alice"));
+        when(soapClient.getRoleListOfUser(credentials, "alice")).thenReturn(List.of("Internal/admin"));
+        when(soapClient.getUserClaimValues(credentials, "alice")).thenReturn(Map.of());
+        when(soapClient.getRolePermissions(credentials, "Internal/admin")).thenThrow(new RuntimeException("permission denied"));
+        when(repository.upsertAll(any())).thenReturn(List.of("doc-1"));
+
+        Wso2UserProfileDiscoveryResponse response = service.discoverUserProfiles(request);
+
+        assertEquals("Internal/admin", response.getUsers().get(0).getRoles().get(0).getRoleName());
+        assertTrue(response.getUsers().get(0).getRoles().get(0).getPermissions().isEmpty());
+    }
+
+    @Test
+    void discoverUserProfiles_sharedRoleFetchesPermissionsOnce() {
+        properties.getSoap().setIncludeRolePermissions(true);
+        Wso2UserProfileDiscoveryRequest request = validRequest();
+        when(tenantProfileService.resolve("probestack", "carbon.super")).thenReturn(credentials);
+        when(soapClient.listUsers(credentials)).thenReturn(List.of("alice", "bob"));
+        when(soapClient.getRoleListOfUser(credentials, "alice")).thenReturn(List.of("Internal/admin"));
+        when(soapClient.getRoleListOfUser(credentials, "bob")).thenReturn(List.of("Internal/admin"));
+        when(soapClient.getUserClaimValues(credentials, "alice")).thenReturn(Map.of());
+        when(soapClient.getUserClaimValues(credentials, "bob")).thenReturn(Map.of());
+        when(soapClient.getRolePermissions(credentials, "Internal/admin")).thenReturn(List.of(permission("/permission/admin/login", true)));
+        when(repository.upsertAll(any())).thenReturn(List.of("doc-1", "doc-2"));
+
+        Wso2UserProfileDiscoveryResponse response = service.discoverUserProfiles(request);
+
+        assertEquals(2, response.getTotalUsers());
+        assertEquals(1, response.getTotalRoles());
+        verify(soapClient, times(1)).getRolePermissions(credentials, "Internal/admin");
+    }
+
+    @Test
+    void discoverUserProfiles_rolePermissionsDisabledSkipsPermissionSoapCalls() {
+        properties.getSoap().setIncludeRolePermissions(false);
+        Wso2UserProfileDiscoveryRequest request = validRequest();
+        when(tenantProfileService.resolve("probestack", "carbon.super")).thenReturn(credentials);
+        when(soapClient.listUsers(credentials)).thenReturn(List.of("alice"));
+        when(soapClient.getRoleListOfUser(credentials, "alice")).thenReturn(List.of("Internal/admin"));
+        when(soapClient.getUserClaimValues(credentials, "alice")).thenReturn(Map.of());
+        when(repository.upsertAll(any())).thenReturn(List.of("doc-1"));
+
+        Wso2UserProfileDiscoveryResponse response = service.discoverUserProfiles(request);
+
+        assertEquals("Internal/admin", response.getUsers().get(0).getRoles().get(0).getRoleName());
+        assertTrue(response.getUsers().get(0).getRoles().get(0).getPermissions().isEmpty());
+        verify(soapClient, never()).getRolePermissions(any(), anyString());
     }
 
     private Wso2UserProfileDiscoveryRequest validRequest() {
@@ -141,28 +218,11 @@ class Wso2UserProfileDiscoveryServiceTest {
         return request;
     }
 
-    private Map<String, Object> scimUser() {
-        return Map.of(
-                "id", "user-1",
-                "userName", "alice",
-                "name", Map.of("givenName", "Alice", "familyName", "Smith"),
-                "emails", List.of(
-                        Map.of("value", "other@example.com", "primary", false),
-                        Map.of("value", "alice@example.com", "primary", true)),
-                "active", true,
-                "userType", "DEFAULT",
-                "groups", List.of(
-                        Map.of("display", "Internal/admin"),
-                        Map.of("display", "creator"))
-        );
+    private Wso2RolePermissionDetail permission(String resourcePath, boolean selected) {
+        return Wso2RolePermissionDetail.builder()
+                .resourcePath(resourcePath)
+                .selected(selected)
+                .build();
     }
 
-    private WebClientResponseException unauthorized() {
-        return WebClientResponseException.create(
-                HttpStatus.UNAUTHORIZED.value(),
-                "Unauthorized",
-                HttpHeaders.EMPTY,
-                new byte[0],
-                StandardCharsets.UTF_8);
-    }
 }
