@@ -22,10 +22,20 @@ import java.util.TreeSet;
  * Diffs two discovery snapshots by their {@code discoveryId}s and reports
  * per-resource-type added / removed / changed / unchanged items.
  *
- * "Changed" detection is shallow on purpose: it compares a small set of
- * common identifying fields (name, version, lifecycleStatus, status, state,
- * enabled, throttlingPolicy). Full deep-diff lands later if it proves
- * necessary.
+ * <p>"Changed" detection is a DEEP compare of the whole stored payload (Map/List
+ * equality is structural in Java), minus {@link #IGNORED_KEYS}. It used to compare a
+ * hand-written list of ~13 field names, which was wrong in two ways: 9 of those names
+ * ({@code state}, {@code status}, {@code enabled}, {@code endpoint}, {@code throttlingPolicy},
+ * …) don't exist in a WSO2 payload at all (so they compared null==null forever), and
+ * {@code lifecycleStatus} was misspelled — the real field is {@code lifeCycleStatus} — so a
+ * publish/unpublish was never detected. Everything that actually matters for a migration
+ * ({@code endpointConfig}, {@code operations}, {@code policies}, {@code apiPolicies},
+ * {@code securityScheme}, {@code corsConfiguration}, {@code mediationPolicies}) was ignored,
+ * so a re-pointed backend or an added resource reported "unchanged".</p>
+ *
+ * <p>The deep compare errs toward reporting "changed": a false "changed" only costs an
+ * unnecessary re-assessment, while a false "unchanged" would wrongly lock a resource that
+ * really did change.</p>
  */
 @Slf4j
 @Service
@@ -35,12 +45,15 @@ public class Wso2ComparisonService {
     private final BaseDiscoveryRepository repository;
     private final DiscoveryProperties discoveryProps;
 
-    private static final List<String> CHANGE_KEYS = List.of(
-            "name", "version", "context",
-            "lifecycleStatus", "state", "status",
-            "enabled", "active",
-            "throttlingPolicy", "policyType",
-            "type", "issuer", "endpoint"
+    /**
+     * Payload keys excluded from the diff: they carry no migration meaning and would otherwise
+     * report a change for a resource that is functionally identical. Everything else — including
+     * {@code lastUpdatedTime} — participates: it only moves when the source object really changed,
+     * which makes it a useful signal rather than noise.
+     */
+    private static final java.util.Set<String> IGNORED_KEYS = java.util.Set.of(
+            "hasThumbnail",
+            "workflowStatus"
     );
 
     public ComparisonResponse compare(String companyName, String wso2Tenant,
@@ -136,14 +149,21 @@ public class Wso2ComparisonService {
                 .build();
     }
 
+    /**
+     * Deep-compares every payload key present on either side (minus {@link #IGNORED_KEYS}) and
+     * returns the names of those that differ. Nested maps/lists compare structurally, so a change
+     * inside {@code endpointConfig} or {@code operations} surfaces as that top-level key.
+     */
     private static List<String> changedFields(DiscoverySnapshot s, DiscoverySnapshot t) {
         List<String> diffs = new ArrayList<>();
         Map<String, Object> sp = s.getPayload() != null ? s.getPayload() : Collections.emptyMap();
         Map<String, Object> tp = t.getPayload() != null ? t.getPayload() : Collections.emptyMap();
-        for (String k : CHANGE_KEYS) {
-            Object a = sp.get(k);
-            Object b = tp.get(k);
-            if (!Objects.equals(a, b)) diffs.add(k);
+        java.util.Set<String> keys = new TreeSet<>();   // sorted → deterministic diff output
+        keys.addAll(sp.keySet());
+        keys.addAll(tp.keySet());
+        for (String k : keys) {
+            if (IGNORED_KEYS.contains(k)) continue;
+            if (!Objects.equals(sp.get(k), tp.get(k))) diffs.add(k);
         }
         return diffs;
     }
