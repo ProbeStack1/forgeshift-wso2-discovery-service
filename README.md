@@ -136,6 +136,7 @@ curl "http://localhost:8081/discovery/v1/wso2/stats/byResourceType?wso2Tenant=ca
 | `discovery_wso2_certificates` | Endpoint TLS certificate snapshots | `POST /wso2/certificates`, bulk |
 | `discovery_wso2_mediationpolicies` | Per-API mediation policy snapshots | `POST /wso2/mediationpolicies`, bulk |
 | `discovery_wso2_users` | SCIM 2.0 user snapshots | `POST /wso2/users`, bulk |
+| `wso2_user_profiles` | Normalized SCIM user profiles for user migration | `POST /user-profiles` |
 | `discovery_revisions` | Per (companyName, wso2Tenant) monotonic counter | every discovery |
 | `discovery_jobs` | Bulk-discovery job documents (state machine + per-resource progress) | `POST /discoveries` |
 | `wso2_organizations` | Auto-upserted list of tenants we have data for | every discovery + inventory |
@@ -347,8 +348,10 @@ Internal defaults (override in `application.yml` if needed):
 | `forgeshift.wso2.admin-api-base` | `/api/am/admin/v4` |
 | `forgeshift.wso2.devportal-api-base` | `/api/am/devportal/v3` |
 | `forgeshift.wso2.scim-api-base` | `/scim2` |
+| `forgeshift.wso2.scim-users-path` | `/Users` |
 | `forgeshift.wso2.token-test.enabled` | `true` (set `false` in prod) |
 | `forgeshift.discovery.collection-prefix` | `discovery_wso2_` |
+| `forgeshift.discovery.user-profiles-collection` | `wso2_user_profiles` |
 | `forgeshift.discovery.default-company-name` | `probestack` |
 | `forgeshift.discovery.audit-enabled` | `true` |
 | `forgeshift.discovery.parallel-thread-pool-size` | `4` |

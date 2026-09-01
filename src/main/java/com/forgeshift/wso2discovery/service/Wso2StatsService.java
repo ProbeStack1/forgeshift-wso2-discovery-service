@@ -67,9 +67,9 @@ public class Wso2StatsService {
                 total += c;
             }
         }
-        return base("byResourceType", company, tenant, total)
-                .counts(counts)
-                .build();
+        StatsResponse response = base("byResourceType", company, tenant, total);
+        response.setCounts(counts);
+        return response;
     }
 
     private StatsResponse byTenant() {
@@ -97,9 +97,9 @@ public class Wso2StatsService {
                 total += c;
             }
         }
-        return base("byTenant", null, null, total)
-                .counts(counts)
-                .build();
+        StatsResponse response = base("byTenant", null, null, total);
+        response.setCounts(counts);
+        return response;
     }
 
     private StatsResponse byDiscoveryId(String company, String tenant) {
@@ -141,9 +141,9 @@ public class Wso2StatsService {
                 }
             }
         }
-        return base("byDiscoveryId", company, tenant, total)
-                .buckets(new ArrayList<>(bucketByDid.values()))
-                .build();
+        StatsResponse response = base("byDiscoveryId", company, tenant, total);
+        response.setBuckets(new ArrayList<>(bucketByDid.values()));
+        return response;
     }
 
     private StatsResponse byTime(String company, String tenant) {
@@ -178,20 +178,21 @@ public class Wso2StatsService {
         // sort keys ascending
         Map<String, Long> sorted = new LinkedHashMap<>();
         new java.util.TreeMap<>(daily).forEach(sorted::put);
-        return base("byTime", company, tenant, total)
-                .counts(sorted)
-                .build();
+        StatsResponse response = base("byTime", company, tenant, total);
+        response.setCounts(sorted);
+        return response;
     }
 
     // ---------------- helpers ----------------
 
-    private StatsResponse.StatsResponseBuilder base(String dimension, String company, String tenant, long total) {
-        return StatsResponse.builder()
-                .companyName(company)
-                .wso2Tenant(tenant)
-                .dimension(dimension)
-                .timestamp(Instant.now())
-                .totalCount(total);
+    private StatsResponse base(String dimension, String company, String tenant, long total) {
+        StatsResponse response = new StatsResponse();
+        response.setCompanyName(company);
+        response.setWso2Tenant(tenant);
+        response.setDimension(dimension);
+        response.setTimestamp(Instant.now());
+        response.setTotalCount(total);
+        return response;
     }
 
     private static org.springframework.data.mongodb.core.query.Query matchTenant(String company, String tenant) {

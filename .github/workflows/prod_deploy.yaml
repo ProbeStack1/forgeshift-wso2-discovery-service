@@ -3,7 +3,7 @@ name: PROD GKE Deploy - Discovery Service
 on:
   push:
     branches:
-      - forgeshift-wso2-discovery-service
+      - user_migration_rest_apis
   workflow_dispatch:
 
 env:
@@ -19,7 +19,7 @@ env:
 jobs:
   deploy-prod-discovery:
 
-    if: github.ref == 'refs/heads/forgeshift-wso2-discovery-service'
+    if: github.ref == 'refs/heads/user_migration_rest_apis'
 
     runs-on: ubuntu-latest
 

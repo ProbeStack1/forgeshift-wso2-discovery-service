@@ -34,6 +34,15 @@ public class DiscoveryProperties {
     /** Per-tenant credential profiles collection (mirrors Apigee 'profiles'). */
     private String profilesCollection = "wso2_profiles";
 
+    /** Normalized WSO2 user profiles discovered for downstream user migration. */
+    private String userProfilesCollection = "wso2_user_profiles";
+
+    /** WSO2 role to Kong role/group mapping rules used before user migration. */
+    private String userRoleMappingsCollection = "wso2_kong_role_mapping";
+
+    /** Per-user and per-role WSO2 to Kong migration status history. */
+    private String userMigrationCollection = "wso2_kong_user_migration";
+
     /** Business-metadata collection for POST /wso2/assetinfo. */
     private String assetInfoCollection = "probestack_wso2_asset_info";
 
