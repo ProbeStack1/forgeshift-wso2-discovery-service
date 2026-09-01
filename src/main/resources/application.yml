@@ -119,6 +119,7 @@ forgeshift:
       identity-base-url: ${KONNECT_IDENTITY_BASE_URL:https://global.api.konghq.com}
       identity-users-path: ${KONNECT_IDENTITY_USERS_PATH:/v3/users}
       identity-teams-path: ${KONNECT_IDENTITY_TEAMS_PATH:/v3/teams}
+      identity-auth-settings-path: ${KONNECT_IDENTITY_AUTH_SETTINGS_PATH:/v3/authentication-settings}
     publisher-scope: apim:api_view
     admin-scope: apim:admin
     devportal-scope: apim:subscribe

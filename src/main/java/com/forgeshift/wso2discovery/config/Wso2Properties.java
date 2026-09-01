@@ -153,5 +153,6 @@ public class Wso2Properties {
         private String identityBaseUrl = "https://global.api.konghq.com";
         private String identityUsersPath = "/v3/users";
         private String identityTeamsPath = "/v3/teams";
+        private String identityAuthSettingsPath = "/v3/authentication-settings";
     }
 }

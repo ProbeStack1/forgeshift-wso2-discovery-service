@@ -55,6 +55,44 @@ public class KonnectIdentityClient {
     }
 
     /**
+     * How the organization signs people in.
+     *
+     * <p>Worth reading before a migration: with no identity provider nobody
+     * arrives in Konnect on their own, so every user resolves to nothing and
+     * the run reports failures that are really a missing precondition.
+     */
+    @Data
+    @Builder
+    public static class KonnectAuthSettings {
+        private boolean oidcEnabled;
+        private boolean samlEnabled;
+        private boolean basicAuthEnabled;
+        private boolean idpMappingEnabled;
+
+        /** True when people can arrive through an identity provider. */
+        public boolean isSsoConfigured() {
+            return oidcEnabled || samlEnabled;
+        }
+    }
+
+    /**
+     * Reads the organization's authentication settings.
+     */
+    public KonnectAuthSettings getAuthSettings(KonnectCredentials creds) {
+        validateConfigured(creds);
+        Map<String, Object> body = get(creds, identityUrl(properties.getKong().getIdentityAuthSettingsPath()));
+        if (body == null) {
+            return KonnectAuthSettings.builder().build();
+        }
+        return KonnectAuthSettings.builder()
+                .oidcEnabled(Boolean.TRUE.equals(body.get("oidc_auth_enabled")))
+                .samlEnabled(Boolean.TRUE.equals(body.get("saml_auth_enabled")))
+                .basicAuthEnabled(Boolean.TRUE.equals(body.get("basic_auth_enabled")))
+                .idpMappingEnabled(Boolean.TRUE.equals(body.get("idp_mapping_enabled")))
+                .build();
+    }
+
+    /**
      * Every team in the organization. Konnect predefines these, so migration
      * maps onto them rather than creating any.
      */

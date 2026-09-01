@@ -58,6 +58,18 @@ public class Wso2KongUserMigrationController {
     }
 
     /**
+     * Reports whether the Konnect organization has single sign-on configured.
+     */
+    @GetMapping("/users/migration/konnect-auth")
+    public ResponseEntity<KonnectIdentityClient.KonnectAuthSettings> getKonnectAuthSettings(
+            @RequestParam(required = false) String companyName,
+            @RequestParam(required = false) String profileName) {
+        String resolvedCompanyName = StringUtils.hasText(companyName)
+                ? companyName : discoveryProperties.getDefaultCompanyName();
+        return ResponseEntity.ok(service.getKonnectAuthSettings(resolvedCompanyName, profileName));
+    }
+
+    /**
      * Returns WSO2 to Kong migration history records.
      */
     @GetMapping("/users/migration/history")

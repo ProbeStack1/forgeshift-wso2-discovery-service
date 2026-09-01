@@ -97,6 +97,18 @@ public class Wso2KongUserMigrationService {
     }
 
     /**
+     * How the Konnect organization signs people in.
+     *
+     * <p>Read before a run so the operator knows whether anyone can arrive in
+     * Konnect at all. Without an identity provider every user resolves to
+     * nothing, and a wall of failures hides what is really a precondition.
+     */
+    public KonnectIdentityClient.KonnectAuthSettings getKonnectAuthSettings(String companyName, String profileName) {
+        List<KonnectCredentials> targets = konnectProfileReader.resolveTargets(companyName, profileName, null);
+        return konnectIdentityClient.getAuthSettings(targets.get(0));
+    }
+
+    /**
      * Parent orchestration method for reading migration history.
      */
     public Wso2UserMigrationHistoryResponse getMigrationHistory(String companyName,
