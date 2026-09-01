@@ -145,5 +145,13 @@ public class Wso2Properties {
          * those entities anyway, is the moment to converge the two schemes.
          */
         private String consumerUsernamePrefix = "user";
+        /**
+         * Konnect identity API. Deliberately separate from the entity API: it
+         * lives on a global host at v3, while control-plane entities are
+         * regional at v2. Using the regional host here returns 404.
+         */
+        private String identityBaseUrl = "https://global.api.konghq.com";
+        private String identityUsersPath = "/v3/users";
+        private String identityTeamsPath = "/v3/teams";
     }
 }

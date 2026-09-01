@@ -16,9 +16,9 @@ import lombok.NoArgsConstructor;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class Wso2UserMigrationResult {
 
-    /** Which Kong control plane this row was applied to. */
-    private String kongControlPlane;
-    private String kongControlPlaneName;
+    /** The Konnect team this role mapped to, when one was resolved. */
+    private String konnectTeamId;
+    private String konnectTeamName;
     private String userName;
     private String userEmail;
     private String wso2RoleName;

@@ -114,6 +114,11 @@ forgeshift:
       # service uses for WSO2 applications. Usernames become
       # <prefix>.<tenant>.<user>, e.g. user.carbon-super.api-developer.
       consumer-username-prefix: ${KONG_CONSUMER_USERNAME_PREFIX:user}
+      # Konnect identity API: global host at v3, unlike the regional v2 host
+      # used for control plane entities. Teams are organization-wide.
+      identity-base-url: ${KONNECT_IDENTITY_BASE_URL:https://global.api.konghq.com}
+      identity-users-path: ${KONNECT_IDENTITY_USERS_PATH:/v3/users}
+      identity-teams-path: ${KONNECT_IDENTITY_TEAMS_PATH:/v3/teams}
     publisher-scope: apim:api_view
     admin-scope: apim:admin
     devportal-scope: apim:subscribe

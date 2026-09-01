@@ -1,7 +1,8 @@
 package com.forgeshift.wso2discovery.service;
 
-import com.forgeshift.wso2discovery.client.KongAdminClient;
+import com.forgeshift.wso2discovery.client.KonnectWriteOutcome;
 import com.forgeshift.wso2discovery.client.KonnectCredentials;
+import com.forgeshift.wso2discovery.client.KonnectIdentityClient;
 import com.forgeshift.wso2discovery.domain.Wso2KongUserMigrationDocument;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationRequest;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationResponse;
@@ -32,7 +33,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for WSO2 to Kong user migration against the Konnect management API.
+ * WSO2 users are added to the Konnect teams their roles map to. Nothing here
+ * creates a Konnect user: a person exists only once invited or signed in.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -42,7 +44,7 @@ class Wso2KongUserMigrationServiceTest {
     private Wso2KongUserMigrationRepository repository;
 
     @Mock
-    private KongAdminClient kongAdminClient;
+    private KonnectIdentityClient konnectIdentityClient;
 
     @Mock
     private KonnectProfileReader konnectProfileReader;
@@ -56,166 +58,126 @@ class Wso2KongUserMigrationServiceTest {
             .controlPlaneId("cp-1234")
             .build();
 
+    private static final KonnectIdentityClient.KonnectTeam PUBLISHER_TEAM =
+            KonnectIdentityClient.KonnectTeam.builder()
+                    .id("team-publisher")
+                    .name("api-product-admin")
+                    .description("Manage API products")
+                    .systemTeam(true)
+                    .build();
+
+    private static final KonnectIdentityClient.KonnectTeam VIEWER_TEAM =
+            KonnectIdentityClient.KonnectTeam.builder()
+                    .id("team-viewer")
+                    .name("organization-admin-readonly")
+                    .systemTeam(true)
+                    .build();
+
     @BeforeEach
     void setUp() {
-        service = new Wso2KongUserMigrationService(repository, kongAdminClient, konnectProfileReader);
+        service = new Wso2KongUserMigrationService(repository, konnectIdentityClient, konnectProfileReader);
         when(konnectProfileReader.resolveTargets(any(), any(), any())).thenReturn(List.of(CREDENTIALS));
+        when(konnectIdentityClient.listTeams(any())).thenReturn(List.of(PUBLISHER_TEAM, VIEWER_TEAM));
+        when(konnectIdentityClient.findUserIdByEmail(any(), any())).thenReturn("konnect-user-1");
     }
 
     @Test
-    void migrateUsers_createsConsumerAndAssignsGroup() {
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
+    void addsTheUserToTheTeamTheirRoleMapsTo() {
+        when(konnectIdentityClient.addUserToTeam(any(), any(), any()))
+                .thenReturn(KonnectWriteOutcome.CREATED);
 
         Wso2UserMigrationResponse response =
-                service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
+                service.migrateUsers(request(role("Internal/publisher", "api-product-admin")));
 
         assertEquals("SUCCESS", response.getOverallStatus());
-        assertEquals(1, response.getTotalRequested());
         assertEquals(1, response.getTotalSuccess());
-        assertEquals(0, response.getTotalFailed());
 
         Wso2UserMigrationResult result = response.getResults().get(0);
-        assertEquals("SUCCESS", result.getMigrationStatus());
         assertEquals("SUCCESS", result.getAssignmentStatus());
+        assertEquals("team-publisher", result.getKonnectTeamId());
+        assertEquals("api-product-admin", result.getKonnectTeamName());
         assertNull(result.getErrorMessage());
 
-        // The ACL must be attached to the uuid Kong returned, not the username.
-        verify(kongAdminClient).assignGroup(eq(CREDENTIALS), eq("consumer-uuid"), eq("kong-subscriber"));
+        verify(konnectIdentityClient).addUserToTeam(eq(CREDENTIALS), eq("team-publisher"), eq("konnect-user-1"));
     }
 
     @Test
-    void migrateUsers_reportsAlreadyExistsWhenNothingChanged() {
-        stubConsumer(KongAdminClient.WriteOutcome.ALREADY_EXISTS, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.ALREADY_EXISTS);
+    void reportsAlreadyExistsWhenTheUserIsAlreadyInTheTeam() {
+        when(konnectIdentityClient.addUserToTeam(any(), any(), any()))
+                .thenReturn(KonnectWriteOutcome.ALREADY_EXISTS);
 
         Wso2UserMigrationResponse response =
-                service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
+                service.migrateUsers(request(role("Internal/publisher", "api-product-admin")));
 
-        assertEquals("SUCCESS", response.getOverallStatus());
         assertEquals(1, response.getTotalAlreadyExists());
         assertEquals(0, response.getTotalSuccess());
     }
 
     @Test
-    void migrateUsers_countsExistingConsumerWithNewGroupAsSuccess() {
-        stubConsumer(KongAdminClient.WriteOutcome.ALREADY_EXISTS, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
+    void tellsTheOperatorWhenThePersonIsNotInKonnectYet() {
+        // The expected case under SSO before anyone has signed in. It is not a
+        // failure of the mapping, and the message has to say what to do.
+        when(konnectIdentityClient.findUserIdByEmail(any(), any())).thenReturn(null);
 
         Wso2UserMigrationResponse response =
-                service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
-
-        // Real work happened, so this is not a no-op row.
-        assertEquals(1, response.getTotalSuccess());
-        assertEquals(0, response.getTotalAlreadyExists());
-    }
-
-    @Test
-    void migrateUsers_createsConsumerOncePerUserNotPerRole() {
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
-
-        Wso2UserMigrationResponse response = service.migrateUsers(request(
-                role("Internal/subscriber", "kong-subscriber"),
-                role("Internal/publisher", "kong-publisher")));
-
-        assertEquals(2, response.getTotalRequested());
-        verify(kongAdminClient, org.mockito.Mockito.times(1))
-                .ensureConsumer(any(), eq("carbon.super"), eq("api.developer"));
-        verify(kongAdminClient, org.mockito.Mockito.times(2)).assignGroup(any(), any(), any());
-    }
-
-    @Test
-    void migrateUsers_appliesEveryUserToEveryControlPlane() {
-        // A user is not environment-specific, so one request covers all planes.
-        KonnectCredentials staging = KonnectCredentials.builder()
-                .konnectBaseUrl("https://us.api.konghq.com")
-                .konnectAccessToken("kpat_test")
-                .controlPlaneId("cp-5678")
-                .controlPlaneName("probestack-staging")
-                .build();
-        when(konnectProfileReader.resolveTargets(any(), any(), any()))
-                .thenReturn(List.of(CREDENTIALS, staging));
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
-
-        Wso2UserMigrationResponse response =
-                service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
-
-        // One user, one role, two control planes.
-        assertEquals(2, response.getTotalRequested());
-        assertEquals(2, response.getTotalSuccess());
-        assertEquals("SUCCESS", response.getOverallStatus());
-        assertEquals(List.of("cp-1234", "cp-5678"),
-                response.getResults().stream().map(Wso2UserMigrationResult::getKongControlPlane).toList());
-        verify(kongAdminClient).ensureConsumer(eq(CREDENTIALS), any(), any());
-        verify(kongAdminClient).ensureConsumer(eq(staging), any(), any());
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void migrateUsers_keepsPerControlPlaneRowsDistinctInStorage() {
-        KonnectCredentials staging = KonnectCredentials.builder()
-                .konnectBaseUrl("https://us.api.konghq.com")
-                .konnectAccessToken("kpat_test")
-                .controlPlaneId("cp-5678")
-                .build();
-        when(konnectProfileReader.resolveTargets(any(), any(), any()))
-                .thenReturn(List.of(CREDENTIALS, staging));
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
-
-        service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
-
-        ArgumentCaptor<List<Wso2KongUserMigrationDocument>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repository).upsertAll(captor.capture());
-        // Same user and role in two planes must not collide on the document id,
-        // or only the last control plane would survive the upsert.
-        assertEquals(2, captor.getValue().stream().map(Wso2KongUserMigrationDocument::getId).distinct().count());
-        assertEquals(List.of("cp-1234", "cp-5678"),
-                captor.getValue().stream().map(Wso2KongUserMigrationDocument::getKongControlPlane).toList());
-    }
-
-    @Test
-    void migrateUsers_failsEveryRowWhenConsumerCreationFails() {
-        when(kongAdminClient.ensureConsumer(any(), any(), any()))
-                .thenThrow(WebClientResponseException.create(
-                        HttpStatus.UNAUTHORIZED.value(), "Unauthorized", null,
-                        "{\"message\":\"Unauthorized\"}".getBytes(), null));
-
-        Wso2UserMigrationResponse response = service.migrateUsers(request(
-                role("Internal/subscriber", "kong-subscriber"),
-                role("Internal/publisher", "kong-publisher")));
+                service.migrateUsers(request(role("Internal/publisher", "api-product-admin")));
 
         assertEquals("FAILED", response.getOverallStatus());
-        assertEquals(2, response.getTotalFailed());
-        // No ACL is attempted once the consumer could not be created.
-        verify(kongAdminClient, never()).assignGroup(any(), any(), any());
-
         String error = response.getResults().get(0).getErrorMessage();
-        assertTrue(error.contains("Kong consumer creation failed"), error);
-        assertTrue(error.contains("401"), error);
+        assertTrue(error.contains("sarah.williams@example.com"), error);
+        assertTrue(error.contains("Invite them"), error);
+        verify(konnectIdentityClient, never()).addUserToTeam(any(), any(), any());
     }
 
     @Test
-    void migrateUsers_marksOnlyTheFailingRoleAsFailed() {
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), eq("kong-subscriber")))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
-        when(kongAdminClient.assignGroup(any(), any(), eq("kong-publisher")))
+    void refusesAUserWithNoEmailBecauseKonnectKeysOnIt() {
+        Wso2UserMigrationUserRequest user = new Wso2UserMigrationUserRequest();
+        user.setUserName("admin");
+        user.setRoles(List.of(role("admin", "organization-admin")));
+        Wso2UserMigrationRequest request = baseRequest();
+        request.setUsers(List.of(user));
+
+        Wso2UserMigrationResponse response = service.migrateUsers(request);
+
+        assertEquals("FAILED", response.getOverallStatus());
+        assertTrue(response.getResults().get(0).getErrorMessage().contains("Konnect identifies people by email"));
+        verify(konnectIdentityClient, never()).findUserIdByEmail(any(), any());
+    }
+
+    @Test
+    void namesTheAvailableTeamsWhenTheMappingPointsAtNone() {
+        Wso2UserMigrationResponse response =
+                service.migrateUsers(request(role("Internal/publisher", "kong-subscriber")));
+
+        String error = response.getResults().get(0).getErrorMessage();
+        assertTrue(error.contains("No Konnect team named kong-subscriber"), error);
+        assertTrue(error.contains("api-product-admin"), error);
+        assertTrue(error.contains("organization-admin-readonly"), error);
+    }
+
+    @Test
+    void matchesTeamNamesRegardlessOfCase() {
+        when(konnectIdentityClient.addUserToTeam(any(), any(), any()))
+                .thenReturn(KonnectWriteOutcome.CREATED);
+
+        Wso2UserMigrationResponse response =
+                service.migrateUsers(request(role("Internal/publisher", "  API-Product-Admin  ")));
+
+        assertEquals(1, response.getTotalSuccess());
+        assertEquals("team-publisher", response.getResults().get(0).getKonnectTeamId());
+    }
+
+    @Test
+    void marksOnlyTheFailingRoleAsFailed() {
+        when(konnectIdentityClient.addUserToTeam(any(), eq("team-publisher"), any()))
+                .thenReturn(KonnectWriteOutcome.CREATED);
+        when(konnectIdentityClient.addUserToTeam(any(), eq("team-viewer"), any()))
                 .thenThrow(WebClientResponseException.create(
-                        HttpStatus.NOT_FOUND.value(), "Not Found", null,
-                        "{\"message\":\"group not found\"}".getBytes(), null));
+                        HttpStatus.FORBIDDEN.value(), "Forbidden", null, "{\"message\":\"no\"}".getBytes(), null));
 
         Wso2UserMigrationResponse response = service.migrateUsers(request(
-                role("Internal/subscriber", "kong-subscriber"),
-                role("Internal/publisher", "kong-publisher")));
+                role("Internal/publisher", "api-product-admin"),
+                role("Internal/everyone", "organization-admin-readonly")));
 
         assertEquals("PARTIAL_SUCCESS", response.getOverallStatus());
         assertEquals(1, response.getTotalSuccess());
@@ -223,74 +185,46 @@ class Wso2KongUserMigrationServiceTest {
     }
 
     @Test
-    void migrateUsers_stillCreatesConsumerWhenUserHasNoRoles() {
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
+    void failsEveryRowWhenTheTeamListCannotBeRead() {
+        when(konnectIdentityClient.listTeams(any()))
+                .thenThrow(WebClientResponseException.create(
+                        HttpStatus.UNAUTHORIZED.value(), "Unauthorized", null, "{}".getBytes(), null));
 
-        Wso2UserMigrationUserRequest user = new Wso2UserMigrationUserRequest();
-        user.setUserName("api.developer");
-        user.setRoles(List.of());
-        Wso2UserMigrationRequest request = baseRequest();
-        request.setUsers(List.of(user));
-
-        Wso2UserMigrationResponse response = service.migrateUsers(request);
-
-        // The user reached Kong; there was simply no group to attach.
-        assertEquals("SUCCESS", response.getOverallStatus());
-        assertEquals("SUCCESS", response.getResults().get(0).getMigrationStatus());
-        assertEquals("SKIPPED", response.getResults().get(0).getAssignmentStatus());
-        verify(kongAdminClient, never()).assignGroup(any(), any(), any());
-    }
-
-    @Test
-    void migrateUsers_returnsInvalidMappingReasonWhenKongRoleIsMissing() {
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-
-        Wso2UserMigrationResponse response =
-                service.migrateUsers(request(role("Internal/subscriber", "")));
+        Wso2UserMigrationResponse response = service.migrateUsers(request(
+                role("Internal/publisher", "api-product-admin"),
+                role("Internal/everyone", "organization-admin-readonly")));
 
         assertEquals("FAILED", response.getOverallStatus());
-        assertEquals("Creation failed due to invalid role mapping. Kong role is required for migration.",
-                response.getResults().get(0).getErrorMessage());
-        verify(kongAdminClient, never()).assignGroup(any(), any(), any());
+        assertEquals(2, response.getTotalFailed());
+        assertTrue(response.getResults().get(0).getErrorMessage().contains("Could not read Konnect teams"));
     }
 
     @Test
-    void migrateUsers_fallsBackToNamespacedUsernameWhenKongReturnsNoId() {
-        stubConsumer(KongAdminClient.WriteOutcome.ALREADY_EXISTS, null);
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
+    void addsTheUserOncePerMappedRole() {
+        when(konnectIdentityClient.addUserToTeam(any(), any(), any()))
+                .thenReturn(KonnectWriteOutcome.CREATED);
 
-        service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
+        service.migrateUsers(request(
+                role("Internal/publisher", "api-product-admin"),
+                role("Internal/everyone", "organization-admin-readonly")));
 
-        verify(kongAdminClient).assignGroup(
-                eq(CREDENTIALS), eq("user.carbon-super.api-developer"), eq("kong-subscriber"));
+        // One lookup for the person, one join per role.
+        verify(konnectIdentityClient, org.mockito.Mockito.times(1)).findUserIdByEmail(any(), any());
+        verify(konnectIdentityClient, org.mockito.Mockito.times(2)).addUserToTeam(any(), any(), any());
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void migrateUsers_persistsOneStatusDocumentPerUserRole() {
-        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
-        when(kongAdminClient.assignGroup(any(), any(), any()))
-                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
+    void recordsTheTeamOnEveryStoredRow() {
+        when(konnectIdentityClient.addUserToTeam(any(), any(), any()))
+                .thenReturn(KonnectWriteOutcome.CREATED);
 
-        service.migrateUsers(request(
-                role("Internal/subscriber", "kong-subscriber"),
-                role("Internal/publisher", "kong-publisher")));
+        service.migrateUsers(request(role("Internal/publisher", "api-product-admin")));
 
         ArgumentCaptor<List<Wso2KongUserMigrationDocument>> captor = ArgumentCaptor.forClass(List.class);
         verify(repository).upsertAll(captor.capture());
-        assertEquals(2, captor.getValue().size());
-        assertEquals("SUCCESS", captor.getValue().get(0).getMigrationStatus());
-        assertEquals("kong-subscriber", captor.getValue().get(0).getKongRoleName());
-    }
-
-    private void stubConsumer(KongAdminClient.WriteOutcome outcome, String id) {
-        when(kongAdminClient.ensureConsumer(any(), any(), any()))
-                .thenReturn(KongAdminClient.ConsumerRef.builder()
-                        .id(id)
-                        .username("user.carbon-super.api-developer")
-                        .outcome(outcome)
-                        .build());
+        assertEquals("team-publisher", captor.getValue().get(0).getKonnectTeamId());
+        assertEquals("api-product-admin", captor.getValue().get(0).getKonnectTeamName());
     }
 
     private Wso2UserMigrationRequest request(Wso2UserMigrationRoleRequest... roles) {
@@ -311,7 +245,6 @@ class Wso2KongUserMigrationServiceTest {
         request.setEnvironment("dev");
         request.setRequestTransactionId("tx-123");
         request.setUserEmail("admin@probestack.io");
-        request.setKongControlPlane("default");
         return request;
     }
 

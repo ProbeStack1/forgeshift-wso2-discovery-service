@@ -1,6 +1,6 @@
 package com.forgeshift.wso2discovery.config;
 
-import com.forgeshift.wso2discovery.client.KongAdminClient;
+import com.forgeshift.wso2discovery.client.KonnectIdentityClient;
 import com.forgeshift.wso2discovery.client.Wso2Client;
 import com.forgeshift.wso2discovery.client.Wso2UserStoreSoapClient;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ class WebClientWiringTest {
             .withUserConfiguration(WebClientConfig.class)
             .withBean(Wso2Client.class)
             .withBean(Wso2UserStoreSoapClient.class)
-            .withBean(KongAdminClient.class);
+            .withBean(KonnectIdentityClient.class);
 
     @Test
     void everyWebClientCollaboratorResolvesToExactlyOneBean() {
@@ -39,7 +39,7 @@ class WebClientWiringTest {
             assertThat(context).hasBean("konnectWebClient");
             assertThat(context).hasSingleBean(Wso2Client.class);
             assertThat(context).hasSingleBean(Wso2UserStoreSoapClient.class);
-            assertThat(context).hasSingleBean(KongAdminClient.class);
+            assertThat(context).hasSingleBean(KonnectIdentityClient.class);
         });
     }
 }

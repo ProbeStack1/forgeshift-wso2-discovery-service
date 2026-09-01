@@ -1,5 +1,6 @@
 package com.forgeshift.wso2discovery.controller;
 
+import com.forgeshift.wso2discovery.client.KonnectIdentityClient;
 import com.forgeshift.wso2discovery.config.DiscoveryProperties;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationHistoryResponse;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationRequest;
@@ -15,6 +16,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * REST endpoints for WSO2 user migration and Kong role/group assignment.
@@ -37,6 +40,21 @@ public class Wso2KongUserMigrationController {
         log.info("[WSO2-KONG-USER-MIGRATION] eventType=wso2_kong_user_migration_request_received companyName={} wso2Tenant={} environment={} requestTransactionId={} methodName=migrateUsers status=RECEIVED",
                 request.getCompanyName(), request.getWso2Tenant(), request.getEnvironment(), request.getRequestTransactionId());
         return ResponseEntity.ok(service.migrateUsers(request));
+    }
+
+    /**
+     * Lists the Konnect teams a WSO2 role can be mapped onto.
+     *
+     * <p>Konnect predefines these, so the mapping screen offers real team names
+     * instead of free text that silently fails at migration time.
+     */
+    @GetMapping("/users/migration/konnect-teams")
+    public ResponseEntity<List<KonnectIdentityClient.KonnectTeam>> listKonnectTeams(
+            @RequestParam(required = false) String companyName,
+            @RequestParam(required = false) String profileName) {
+        String resolvedCompanyName = StringUtils.hasText(companyName)
+                ? companyName : discoveryProperties.getDefaultCompanyName();
+        return ResponseEntity.ok(service.listKonnectTeams(resolvedCompanyName, profileName));
     }
 
     /**

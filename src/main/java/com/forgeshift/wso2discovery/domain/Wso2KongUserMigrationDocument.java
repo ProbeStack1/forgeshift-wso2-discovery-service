@@ -25,6 +25,9 @@ public class Wso2KongUserMigrationDocument {
     private String environment;
     private String requestTransactionId;
     private String kongControlPlane;
+    /** Konnect team the user was added to; organization-wide, not per control plane. */
+    private String konnectTeamId;
+    private String konnectTeamName;
     private String userName;
     private String userEmail;
     private String firstName;

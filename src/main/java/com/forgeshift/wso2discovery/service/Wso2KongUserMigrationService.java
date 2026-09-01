@@ -1,7 +1,8 @@
 package com.forgeshift.wso2discovery.service;
 
-import com.forgeshift.wso2discovery.client.KongAdminClient;
+import com.forgeshift.wso2discovery.client.KonnectWriteOutcome;
 import com.forgeshift.wso2discovery.client.KonnectCredentials;
+import com.forgeshift.wso2discovery.client.KonnectIdentityClient;
 import com.forgeshift.wso2discovery.domain.Wso2KongUserMigrationDocument;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationHistoryResponse;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationRequest;
@@ -19,6 +20,8 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -35,6 +38,12 @@ public class Wso2KongUserMigrationService {
     private static final String INVALID_MAPPING_REASON =
             "Creation failed due to invalid role mapping. Kong role is required for migration.";
     private static final String NO_ROLES_REASON = "No mapped Kong roles supplied";
+    private static final String NO_EMAIL_REASON =
+            "No email address on the WSO2 user. Konnect identifies people by email, so this user cannot be matched.";
+    private static final String NOT_IN_KONNECT_REASON =
+            "No Konnect user with the email %s. Invite them, or let them sign in through your identity provider, then re-run.";
+    private static final String NO_SUCH_TEAM_REASON =
+            "No Konnect team named %s. Available teams: %s";
     private static final int MAX_ERROR_BODY = 300;
 
     private static final String STATUS_SUCCESS = "SUCCESS";
@@ -43,7 +52,7 @@ public class Wso2KongUserMigrationService {
     private static final String STATUS_SKIPPED = "SKIPPED";
 
     private final Wso2KongUserMigrationRepository repository;
-    private final KongAdminClient kongAdminClient;
+    private final KonnectIdentityClient konnectIdentityClient;
     private final KonnectProfileReader konnectProfileReader;
 
     /**
@@ -61,8 +70,10 @@ public class Wso2KongUserMigrationService {
             List<KonnectCredentials> targets = konnectProfileReader.resolveTargets(
                     request.getCompanyName(), request.getProfileName(), request.getKongControlPlane());
 
-            // Step 3: Create consumers and assign ACL groups in each control plane
-            List<Wso2UserMigrationResult> results = processTargets(request, targets);
+            // Step 3: Add users to the Konnect teams their roles map to.
+            // Teams are organization-wide, so one credential covers them all -
+            // there is no control plane in any identity path.
+            List<Wso2UserMigrationResult> results = processUsers(request, targets.get(0));
 
             // Step 4: Save one migration status document per user-role
             saveResults(request, results);
@@ -75,6 +86,14 @@ public class Wso2KongUserMigrationService {
             logEvent("wso2_kong_user_migration_failed", request, "migrateUsers", "FAILED", start, ex.getMessage());
             throw ex;
         }
+    }
+
+    /**
+     * The Konnect teams available to map WSO2 roles onto.
+     */
+    public List<KonnectIdentityClient.KonnectTeam> listKonnectTeams(String companyName, String profileName) {
+        List<KonnectCredentials> targets = konnectProfileReader.resolveTargets(companyName, profileName, null);
+        return konnectIdentityClient.listTeams(targets.get(0));
     }
 
     /**
@@ -129,123 +148,133 @@ public class Wso2KongUserMigrationService {
     }
 
     /**
-     * Applies the whole user set to every target control plane.
+     * Adds each WSO2 user to the Konnect teams their roles map to.
      *
-     * <p>A user is not scoped to one environment, so the same person is created
-     * in each control plane. One row is produced per user, role and control
-     * plane, which is what the status collection is keyed on.
+     * <p>Konnect teams are organization-wide, so unlike consumers there is no
+     * control plane to fan out across: one pass covers the whole organization.
+     *
+     * <p>This does not create Konnect users. A person exists in Konnect only
+     * once they have been invited or have signed in through the identity
+     * provider; until then there is nothing to add to a team, and the row says
+     * so rather than inventing an account.
      */
-    private List<Wso2UserMigrationResult> processTargets(Wso2UserMigrationRequest request,
-                                                         List<KonnectCredentials> targets) {
+    private List<Wso2UserMigrationResult> processUsers(Wso2UserMigrationRequest request,
+                                                       KonnectCredentials credentials) {
+        Map<String, KonnectIdentityClient.KonnectTeam> teamsByName;
+        try {
+            teamsByName = konnectIdentityClient.listTeams(credentials).stream()
+                    .filter(team -> StringUtils.hasText(team.getName()))
+                    .collect(Collectors.toMap(
+                            team -> team.getName().trim().toLowerCase(Locale.ROOT),
+                            team -> team,
+                            (first, second) -> first));
+        } catch (RuntimeException ex) {
+            String message = failureMessage("Could not read Konnect teams", ex);
+            return request.getUsers().stream()
+                    .flatMap(user -> failedRowsForUser(user, message).stream())
+                    .collect(Collectors.toList());
+        }
+
+        log.info("[WSO2-KONG-USER-MIGRATION] eventType=wso2_kong_user_migration_teams_loaded companyName={} "
+                        + "requestTransactionId={} teamCount={}",
+                request.getCompanyName(), request.getRequestTransactionId(), teamsByName.size());
+
         List<Wso2UserMigrationResult> results = new ArrayList<>();
-        for (KonnectCredentials credentials : targets) {
-            logTarget(request, credentials);
-            for (Wso2UserMigrationUserRequest user : request.getUsers()) {
-                results.addAll(processUser(user, request.getWso2Tenant(), credentials));
-            }
+        for (Wso2UserMigrationUserRequest user : request.getUsers()) {
+            results.addAll(processUser(user, credentials, teamsByName));
         }
         return results;
     }
 
     /**
-     * Records which control plane a batch is being applied to, so a run
-     * spanning several is traceable in the logs.
-     */
-    private void logTarget(Wso2UserMigrationRequest request, KonnectCredentials credentials) {
-        log.info("[WSO2-KONG-USER-MIGRATION] eventType=wso2_kong_user_migration_control_plane companyName={} "
-                        + "requestTransactionId={} controlPlaneId={} controlPlaneName={} userCount={}",
-                request.getCompanyName(), request.getRequestTransactionId(),
-                credentials.getControlPlaneId(), credentials.getControlPlaneName(), request.getUsers().size());
-    }
-
-    /**
-     * Creates the Kong consumer for one WSO2 user, then assigns each mapped
-     * role to it as an ACL group.
-     *
-     * <p>The consumer is created once per user rather than once per role, so a
-     * user with three roles produces one consumer and three ACL assignments.
-     * Every returned row still represents one user-role pair, which is what the
-     * response counts and the history collection are keyed on.
+     * Resolves one WSO2 user to a Konnect user by email, then joins the teams
+     * their roles map to.
      */
     private List<Wso2UserMigrationResult> processUser(Wso2UserMigrationUserRequest user,
-                                                      String wso2Tenant,
-                                                      KonnectCredentials credentials) {
-        KongAdminClient.ConsumerRef consumer;
-        try {
-            consumer = kongAdminClient.ensureConsumer(credentials, wso2Tenant, user.getUserName());
-        } catch (RuntimeException ex) {
-            // The consumer is a prerequisite for every ACL, so a failure here
-            // fails all rows for that user instead of half-applying them.
-            return failedRowsForUser(credentials, user, failureMessage("Kong consumer creation failed", ex));
+                                                      KonnectCredentials credentials,
+                                                      Map<String, KonnectIdentityClient.KonnectTeam> teamsByName) {
+        if (!StringUtils.hasText(user.getUserEmail())) {
+            return failedRowsForUser(user, NO_EMAIL_REASON);
         }
 
-        String migrationStatus = consumer.getOutcome() == KongAdminClient.WriteOutcome.CREATED
-                ? STATUS_SUCCESS : STATUS_ALREADY_EXISTS;
-        // Prefer the uuid when Kong returned one, else the namespaced username
-        // the client actually created - never the raw WSO2 name, which is not
-        // what the consumer is called in Kong.
-        String consumerRef = StringUtils.hasText(consumer.getId()) ? consumer.getId() : consumer.getUsername();
+        String konnectUserId;
+        try {
+            konnectUserId = konnectIdentityClient.findUserIdByEmail(credentials, user.getUserEmail());
+        } catch (RuntimeException ex) {
+            return failedRowsForUser(user, failureMessage("Konnect user lookup failed", ex));
+        }
+        if (!StringUtils.hasText(konnectUserId)) {
+            return failedRowsForUser(user, String.format(NOT_IN_KONNECT_REASON, user.getUserEmail()));
+        }
 
         if (user.getRoles() == null || user.getRoles().isEmpty()) {
-            return List.of(buildResult(credentials, user, null, migrationStatus, STATUS_SKIPPED, NO_ROLES_REASON));
+            return List.of(buildResult(user, null, null, STATUS_SUCCESS, STATUS_SKIPPED, NO_ROLES_REASON));
         }
 
         List<Wso2UserMigrationResult> rows = new ArrayList<>();
         for (Wso2UserMigrationRoleRequest role : user.getRoles()) {
-            rows.add(assignRole(user, role, credentials, consumerRef, migrationStatus));
+            rows.add(joinTeam(user, role, credentials, konnectUserId, teamsByName));
         }
         return rows;
     }
 
     /**
-     * Assigns one Kong ACL group and maps the outcome onto a result row.
+     * Adds the user to the one team this role maps to.
      */
-    private Wso2UserMigrationResult assignRole(Wso2UserMigrationUserRequest user,
-                                               Wso2UserMigrationRoleRequest role,
-                                               KonnectCredentials credentials,
-                                               String consumerRef,
-                                               String migrationStatus) {
+    private Wso2UserMigrationResult joinTeam(Wso2UserMigrationUserRequest user,
+                                             Wso2UserMigrationRoleRequest role,
+                                             KonnectCredentials credentials,
+                                             String konnectUserId,
+                                             Map<String, KonnectIdentityClient.KonnectTeam> teamsByName) {
         if (role == null || !StringUtils.hasText(role.getKongRoleName())) {
-            return buildResult(credentials, user, role, migrationStatus, STATUS_FAILED, INVALID_MAPPING_REASON);
+            return buildResult(user, role, null, STATUS_SUCCESS, STATUS_FAILED, INVALID_MAPPING_REASON);
         }
+
+        KonnectIdentityClient.KonnectTeam team =
+                teamsByName.get(role.getKongRoleName().trim().toLowerCase(Locale.ROOT));
+        if (team == null) {
+            return buildResult(user, role, null, STATUS_SUCCESS, STATUS_FAILED,
+                    String.format(NO_SUCH_TEAM_REASON, role.getKongRoleName(),
+                            String.join(", ", new java.util.TreeSet<>(teamsByName.keySet()))));
+        }
+
         try {
-            KongAdminClient.WriteOutcome outcome =
-                    kongAdminClient.assignGroup(credentials, consumerRef, role.getKongRoleName());
-            String assignmentStatus = outcome == KongAdminClient.WriteOutcome.CREATED
+            KonnectWriteOutcome outcome =
+                    konnectIdentityClient.addUserToTeam(credentials, team.getId(), konnectUserId);
+            String assignmentStatus = outcome == KonnectWriteOutcome.CREATED
                     ? STATUS_SUCCESS : STATUS_ALREADY_EXISTS;
-            return buildResult(credentials, user, role, migrationStatus, assignmentStatus, null);
+            return buildResult(user, role, team, STATUS_SUCCESS, assignmentStatus, null);
         } catch (RuntimeException ex) {
-            return buildResult(credentials, user, role, migrationStatus, STATUS_FAILED,
-                    failureMessage("Kong role assignment failed", ex));
+            return buildResult(user, role, team, STATUS_SUCCESS, STATUS_FAILED,
+                    failureMessage("Adding the user to the Konnect team failed", ex));
         }
     }
+
 
     /**
      * Builds one FAILED row per role when the consumer could not be created.
      */
-    private List<Wso2UserMigrationResult> failedRowsForUser(KonnectCredentials credentials,
-                                                            Wso2UserMigrationUserRequest user,
-                                                            String message) {
+    private List<Wso2UserMigrationResult> failedRowsForUser(Wso2UserMigrationUserRequest user, String message) {
         if (user.getRoles() == null || user.getRoles().isEmpty()) {
-            return List.of(buildResult(credentials, user, null, STATUS_FAILED, STATUS_FAILED, message));
+            return List.of(buildResult(user, null, null, STATUS_FAILED, STATUS_FAILED, message));
         }
         return user.getRoles().stream()
-                .map(role -> buildResult(credentials, user, role, STATUS_FAILED, STATUS_FAILED, message))
+                .map(role -> buildResult(user, role, null, STATUS_FAILED, STATUS_FAILED, message))
                 .collect(Collectors.toList());
     }
 
     /**
      * Builds one user-role result row.
      */
-    private Wso2UserMigrationResult buildResult(KonnectCredentials credentials,
-                                                Wso2UserMigrationUserRequest user,
+    private Wso2UserMigrationResult buildResult(Wso2UserMigrationUserRequest user,
                                                 Wso2UserMigrationRoleRequest role,
+                                                KonnectIdentityClient.KonnectTeam team,
                                                 String migrationStatus,
                                                 String assignmentStatus,
                                                 String errorMessage) {
         return Wso2UserMigrationResult.builder()
-                .kongControlPlane(credentials.getControlPlaneId())
-                .kongControlPlaneName(credentials.getControlPlaneName())
+                .konnectTeamId(team != null ? team.getId() : null)
+                .konnectTeamName(team != null ? team.getName() : null)
                 .userName(user.getUserName())
                 .userEmail(user.getUserEmail())
                 .wso2RoleName(role != null ? role.getWso2RoleName() : null)
@@ -297,7 +326,6 @@ public class Wso2KongUserMigrationService {
                 request.getCompanyName(),
                 request.getWso2Tenant(),
                 request.getRequestTransactionId(),
-                safe(result.getKongControlPlane()),
                 safe(result.getUserName()),
                 safe(result.getKongRoleName()));
         return Wso2KongUserMigrationDocument.builder()
@@ -309,8 +337,11 @@ public class Wso2KongUserMigrationService {
                 .wso2Tenant(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .requestTransactionId(request.getRequestTransactionId())
-                .kongControlPlane(defaultIfBlank(result.getKongControlPlane(),
-                        defaultIfBlank(request.getKongControlPlane(), "default")))
+                // Kept as run context. Konnect teams are organization-wide, so
+                // this no longer identifies where the membership landed.
+                .kongControlPlane(defaultIfBlank(request.getKongControlPlane(), "default"))
+                .konnectTeamId(result.getKonnectTeamId())
+                .konnectTeamName(result.getKonnectTeamName())
                 .userName(result.getUserName())
                 .userEmail(result.getUserEmail())
                 .wso2RoleName(result.getWso2RoleName())
@@ -367,7 +398,8 @@ public class Wso2KongUserMigrationService {
      */
     private Wso2UserMigrationResult toResult(Wso2KongUserMigrationDocument document) {
         return Wso2UserMigrationResult.builder()
-                .kongControlPlane(document.getKongControlPlane())
+                .konnectTeamId(document.getKonnectTeamId())
+                .konnectTeamName(document.getKonnectTeamName())
                 .userName(document.getUserName())
                 .userEmail(document.getUserEmail())
                 .wso2RoleName(document.getWso2RoleName())
@@ -381,11 +413,9 @@ public class Wso2KongUserMigrationService {
     /**
      * Collapses one row down to a single outcome for the response counters.
      *
-     * <p>A row covers two writes - the consumer and its ACL group - so either
-     * one failing makes the row a failure. A row only counts as ALREADY_EXISTS
-     * when nothing at all had to change; if the consumer was already there but
-     * the group was newly assigned, real work happened and it counts as
-     * success. A user with no mapped roles is judged on the consumer alone.
+     * <p>A row is one team join. It counts as ALREADY_EXISTS when the person
+     * was in that team already, so a re-run reports nothing changed rather
+     * than claiming fresh work.
      */
     private String rowStatus(Wso2UserMigrationResult result) {
         String migration = result.getMigrationStatus();
@@ -393,13 +423,14 @@ public class Wso2KongUserMigrationService {
         if (STATUS_FAILED.equals(migration) || STATUS_FAILED.equals(assignment)) {
             return STATUS_FAILED;
         }
+        // A user with no mapped roles had nothing to join, so the row is judged
+        // on resolving the person alone.
         if (STATUS_SKIPPED.equals(assignment)) {
             return migration;
         }
-        if (STATUS_ALREADY_EXISTS.equals(migration) && STATUS_ALREADY_EXISTS.equals(assignment)) {
-            return STATUS_ALREADY_EXISTS;
-        }
-        return STATUS_SUCCESS;
+        // Otherwise the row is one team join, and its outcome is the row's:
+        // ALREADY_EXISTS means the person was in the team already.
+        return assignment;
     }
 
     /**
