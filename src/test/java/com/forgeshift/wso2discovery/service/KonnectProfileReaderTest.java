@@ -117,6 +117,55 @@ class KonnectProfileReaderTest {
     }
 
     @Test
+    void picksTheProfileMarkedDefaultWhenACompanyHasSeveral() {
+        // Profiles are named after the company, so callers never ask for
+        // "primary"; without a default two active profiles matched nothing and
+        // the resolver fell through to static config.
+        stubProfiles(
+                profile("probestack-kong-konnect-staging", false, controlPlane("cp-staging", "staging")),
+                profile("probestack-kong-konnect", true, controlPlane("cp-1234", "probestack-wso2-kong")));
+
+        List<KonnectCredentials> targets = reader.resolveTargets("probestack", null, null);
+
+        assertEquals(1, targets.size());
+        assertEquals("cp-1234", targets.get(0).getControlPlaneId());
+        assertEquals("profile", targets.get(0).getSource());
+    }
+
+    @Test
+    void fallsBackToStaticWhenSeveralProfilesAndNoneIsDefault() {
+        // Legacy data written before the default flag existed.
+        stubProfiles(
+                profile("probestack-kong-konnect-a", false, controlPlane("cp-a", "a")),
+                profile("probestack-kong-konnect-b", false, controlPlane("cp-b", "b")));
+
+        assertEquals("static", reader.resolveTargets("probestack", null, null).get(0).getSource());
+    }
+
+    @Test
+    void aSingleProfileStillWorksWithoutTheDefaultFlag() {
+        // Existing single-profile companies must keep working untouched.
+        stubProfiles(profile("probestack-kong-konnect", false, controlPlane("cp-1234", "probestack-wso2-kong")));
+
+        List<KonnectCredentials> targets = reader.resolveTargets("probestack", null, null);
+
+        assertEquals("cp-1234", targets.get(0).getControlPlaneId());
+        assertEquals("profile", targets.get(0).getSource());
+    }
+
+    @Test
+    void anExplicitProfileNameStillWinsOverTheDefault() {
+        Document staging = profile("probestack-kong-konnect-staging", false, controlPlane("cp-staging", "staging"));
+        Document primary = profile("probestack-kong-konnect", true, controlPlane("cp-1234", "probestack-wso2-kong"));
+        when(mongoTemplate.find(any(Query.class), eq(Document.class), any()))
+                .thenReturn(List.of(staging))      // named lookup
+                .thenReturn(List.of(staging, primary));
+
+        assertEquals("cp-staging",
+                reader.resolveTargets("probestack", "probestack-kong-konnect-staging", null).get(0).getControlPlaneId());
+    }
+
+    @Test
     void fallbackIgnoresThePlaceholderWhenNoProfileMatches() {
         when(mongoTemplate.find(any(Query.class), eq(Document.class), any())).thenReturn(List.of());
         Wso2Properties props = new Wso2Properties();
@@ -139,6 +188,23 @@ class KonnectProfileReaderTest {
                 .append("konnectPat", "kpat_test")
                 .append("controlPlanes", List.of(controlPlanes));
         when(mongoTemplate.find(any(Query.class), eq(Document.class), any())).thenReturn(List.of(profile));
+    }
+
+    private void stubProfiles(Document... profiles) {
+        when(mongoTemplate.find(any(Query.class), eq(Document.class), any()))
+                .thenReturn(List.of())              // named lookup misses
+                .thenReturn(List.of(profiles));     // active-profile sweep
+    }
+
+    private Document profile(String profileName, boolean isDefault, Document... controlPlanes) {
+        return new Document()
+                .append("companyName", "probestack")
+                .append("profileName", profileName)
+                .append("status", "ACTIVE")
+                .append("adminUrl", "https://us.api.konghq.com")
+                .append("konnectPat", "kpat_test")
+                .append("defaultProfile", isDefault)
+                .append("controlPlanes", List.of(controlPlanes));
     }
 
     private Document controlPlane(String id, String name) {

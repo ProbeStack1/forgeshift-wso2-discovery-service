@@ -131,8 +131,13 @@ public class KonnectProfileReader {
     }
 
     /**
-     * Finds the named ACTIVE profile, or the sole ACTIVE one when "primary" is
-     * requested but not present.
+     * Finds the profile to use: the one the caller named, else the company
+     * default, else the sole active one.
+     *
+     * <p>The default is what makes more than one profile workable. Without it a
+     * company with two active profiles matched nothing - the caller never asks
+     * for "primary" because profiles are named after the company - and every
+     * resolver fell through to static config.
      */
     private Document findProfile(String companyName, String desiredName) {
         Query query = Query.query(Criteria.where("companyName").is(companyName)
@@ -145,18 +150,38 @@ public class KonnectProfileReader {
         if (doc != null || !"primary".equalsIgnoreCase(desiredName)) {
             return doc;
         }
-        Query fallback = Query.query(Criteria.where("companyName").is(companyName))
-                .with(Sort.by(Sort.Direction.DESC, "lastUpdatedAt", "updatedAt", "createdAt"));
-        List<Document> active = mongoTemplate.find(fallback, Document.class, props.getKong().getProfilesCollection())
-                .stream()
-                .filter(KonnectProfileReader::isActive)
-                .toList();
+
+        List<Document> active = activeProfiles(companyName);
+
+        Document markedDefault = active.stream()
+                .filter(profile -> Boolean.TRUE.equals(profile.getBoolean("defaultProfile")))
+                .findFirst()
+                .orElse(null);
+        if (markedDefault != null) {
+            log.debug("Using default Kong Konnect profile '{}' for company={}",
+                    markedDefault.getString("profileName"), companyName);
+            return markedDefault;
+        }
+
         if (active.size() == 1) {
-            log.info("No Kong Konnect profile named 'primary' for company={}; using sole ACTIVE profile '{}'",
+            log.info("No default Kong Konnect profile for company={}; using sole ACTIVE profile '{}'",
                     companyName, active.get(0).getString("profileName"));
             return active.get(0);
         }
+        if (active.size() > 1) {
+            log.warn("Company={} has {} active Kong Konnect profiles and none marked default; "
+                    + "set one in the Kong Konnect config or pass profileName", companyName, active.size());
+        }
         return null;
+    }
+
+    private List<Document> activeProfiles(String companyName) {
+        Query query = Query.query(Criteria.where("companyName").is(companyName))
+                .with(Sort.by(Sort.Direction.DESC, "lastUpdatedAt", "updatedAt", "createdAt"));
+        return mongoTemplate.find(query, Document.class, props.getKong().getProfilesCollection())
+                .stream()
+                .filter(KonnectProfileReader::isActive)
+                .toList();
     }
 
     /**
