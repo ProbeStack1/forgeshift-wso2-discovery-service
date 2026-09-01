@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Reads Kong Konnect profiles written by the profile-config service from the
@@ -59,9 +60,25 @@ public class KonnectProfileReader {
                 .source("static")
                 .konnectBaseUrl(props.getKong().getBaseUrlFallback())
                 .konnectAccessToken(props.getKong().getAccessTokenFallback())
-                .controlPlaneId(StringUtils.hasText(requestedControlPlaneId)
-                        ? requestedControlPlaneId : props.getKong().getControlPlaneIdFallback())
+                .controlPlaneId(isUnspecified(requestedControlPlaneId)
+                        ? props.getKong().getControlPlaneIdFallback() : requestedControlPlaneId)
                 .build();
+    }
+
+    /**
+     * Treats the legacy {@code "default"} placeholder as "no control plane
+     * requested".
+     *
+     * <p>Callers have long sent {@code kongControlPlane: "default"} to mean
+     * "unspecified" - the w2k UI still does, and the migration status document
+     * uses the same placeholder. Once that value started selecting a control
+     * plane it would otherwise be looked up as a real name and fail every
+     * request. A control plane genuinely named "default" still wins, because
+     * matching is attempted before this fallback applies.
+     */
+    private static boolean isUnspecified(String requestedControlPlaneId) {
+        return !StringUtils.hasText(requestedControlPlaneId)
+                || "default".equalsIgnoreCase(requestedControlPlaneId.trim());
     }
 
     /**
@@ -106,13 +123,20 @@ public class KonnectProfileReader {
                 .filter(Objects::nonNull)
                 .toList();
         if (StringUtils.hasText(requestedControlPlaneId)) {
-            return docs.stream()
+            Optional<Document> match = docs.stream()
                     .filter(cp -> requestedControlPlaneId.equals(cp.getString("controlPlaneId"))
                             || requestedControlPlaneId.equals(cp.getString("controlPlaneName"))
                             || requestedControlPlaneId.equals(cp.getString("name")))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Control Plane not found in Kong Konnect profile: " + requestedControlPlaneId));
+                    .findFirst();
+            if (match.isPresent()) {
+                return match.get();
+            }
+            // Asking for a plane that does not exist is an error, unless the
+            // value is the "default" placeholder that means "unspecified".
+            if (!isUnspecified(requestedControlPlaneId)) {
+                throw new IllegalArgumentException(
+                        "Control Plane not found in Kong Konnect profile: " + requestedControlPlaneId);
+            }
         }
         if (docs.size() == 1) {
             return docs.get(0);
