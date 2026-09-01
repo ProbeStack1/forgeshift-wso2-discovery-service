@@ -1,5 +1,7 @@
 package com.forgeshift.wso2discovery.service;
 
+import com.forgeshift.wso2discovery.client.KongAdminClient;
+import com.forgeshift.wso2discovery.client.KonnectCredentials;
 import com.forgeshift.wso2discovery.domain.Wso2KongUserMigrationDocument;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationHistoryResponse;
 import com.forgeshift.wso2discovery.dto.Wso2UserMigrationRequest;
@@ -12,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -29,12 +32,19 @@ public class Wso2KongUserMigrationService {
 
     private static final String SOURCE_GATEWAY = "wso2";
     private static final String TARGET_GATEWAY = "kong";
-    private static final String MIGRATION_DISABLED_REASON =
-            "Kong user migration is not enabled. IDP is not configured to migrate WSO2 users to Kong.";
     private static final String INVALID_MAPPING_REASON =
             "Creation failed due to invalid role mapping. Kong role is required for migration.";
+    private static final String NO_ROLES_REASON = "No mapped Kong roles supplied";
+    private static final int MAX_ERROR_BODY = 300;
+
+    private static final String STATUS_SUCCESS = "SUCCESS";
+    private static final String STATUS_ALREADY_EXISTS = "ALREADY_EXISTS";
+    private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_SKIPPED = "SKIPPED";
 
     private final Wso2KongUserMigrationRepository repository;
+    private final KongAdminClient kongAdminClient;
+    private final KonnectProfileReader konnectProfileReader;
 
     /**
      * Parent orchestration method for migrating WSO2 users to Kong.
@@ -46,13 +56,17 @@ public class Wso2KongUserMigrationService {
             // Step 1: Validate request
             validateMigrationRequest(request);
 
-            // Step 2: Process each user-role migration assignment
-            List<Wso2UserMigrationResult> results = processUsers(request);
+            // Step 2: Resolve the target Kong Konnect control plane for this company
+            KonnectCredentials credentials = konnectProfileReader.resolve(
+                    request.getCompanyName(), request.getProfileName(), request.getKongControlPlane());
 
-            // Step 3: Save one migration status document per user-role
+            // Step 3: Create consumers and assign ACL groups in Kong
+            List<Wso2UserMigrationResult> results = processUsers(request, credentials);
+
+            // Step 4: Save one migration status document per user-role
             saveResults(request, results);
 
-            // Step 4: Build final migration response
+            // Step 5: Build final migration response
             Wso2UserMigrationResponse response = buildResponse(request, results);
             logEvent("wso2_kong_user_migration_completed", request, "migrateUsers", "SUCCESS", start, null);
             return response;
@@ -114,65 +128,122 @@ public class Wso2KongUserMigrationService {
     }
 
     /**
-     * Processes every requested user and role assignment.
+     * Processes every requested user against the Kong Konnect control plane.
      */
-    private List<Wso2UserMigrationResult> processUsers(Wso2UserMigrationRequest request) {
+    private List<Wso2UserMigrationResult> processUsers(Wso2UserMigrationRequest request,
+                                                       KonnectCredentials credentials) {
         List<Wso2UserMigrationResult> results = new ArrayList<>();
         for (Wso2UserMigrationUserRequest user : request.getUsers()) {
-            if (user.getRoles() == null || user.getRoles().isEmpty()) {
-                results.add(skippedResult(user, null, "No mapped Kong roles supplied"));
-                continue;
-            }
-            for (Wso2UserMigrationRoleRequest role : user.getRoles()) {
-                results.add(processSingleAssignment(user, role));
-            }
+            results.addAll(processUser(user, credentials));
         }
         return results;
     }
 
     /**
-     * Builds a demo-safe result for one user-role assignment without invoking
-     * Kong Admin API until IDP and migration configuration are finalized.
+     * Creates the Kong consumer for one WSO2 user, then assigns each mapped
+     * role to it as an ACL group.
+     *
+     * <p>The consumer is created once per user rather than once per role, so a
+     * user with three roles produces one consumer and three ACL assignments.
+     * Every returned row still represents one user-role pair, which is what the
+     * response counts and the history collection are keyed on.
      */
-    private Wso2UserMigrationResult processSingleAssignment(Wso2UserMigrationUserRequest user,
-                                                            Wso2UserMigrationRoleRequest role) {
-        String errorMessage = migrationErrorMessage(role);
-        return Wso2UserMigrationResult.builder()
-                .userName(user.getUserName())
-                .userEmail(user.getUserEmail())
-                .wso2RoleName(role.getWso2RoleName())
-                .kongRoleName(role.getKongRoleName())
-                .migrationStatus("FAILED")
-                .assignmentStatus("FAILED")
-                .errorMessage(errorMessage)
-                .build();
-    }
-
-    /**
-     * Returns the most useful user-facing failure reason for the assignment.
-     */
-    private String migrationErrorMessage(Wso2UserMigrationRoleRequest role) {
-        if (role == null || !StringUtils.hasText(role.getKongRoleName())) {
-            return INVALID_MAPPING_REASON;
+    private List<Wso2UserMigrationResult> processUser(Wso2UserMigrationUserRequest user,
+                                                      KonnectCredentials credentials) {
+        KongAdminClient.ConsumerRef consumer;
+        try {
+            consumer = kongAdminClient.ensureConsumer(credentials, user.getUserName(), user.getUserEmail());
+        } catch (RuntimeException ex) {
+            // The consumer is a prerequisite for every ACL, so a failure here
+            // fails all rows for that user instead of half-applying them.
+            return failedRowsForUser(user, failureMessage("Kong consumer creation failed", ex));
         }
-        return MIGRATION_DISABLED_REASON;
+
+        String migrationStatus = consumer.getOutcome() == KongAdminClient.WriteOutcome.CREATED
+                ? STATUS_SUCCESS : STATUS_ALREADY_EXISTS;
+        // Prefer the uuid when Kong returned one; the username also resolves.
+        String consumerRef = StringUtils.hasText(consumer.getId()) ? consumer.getId() : user.getUserName();
+
+        if (user.getRoles() == null || user.getRoles().isEmpty()) {
+            return List.of(buildResult(user, null, migrationStatus, STATUS_SKIPPED, NO_ROLES_REASON));
+        }
+
+        List<Wso2UserMigrationResult> rows = new ArrayList<>();
+        for (Wso2UserMigrationRoleRequest role : user.getRoles()) {
+            rows.add(assignRole(user, role, credentials, consumerRef, migrationStatus));
+        }
+        return rows;
     }
 
     /**
-     * Builds a skipped migration result for a user without mapped roles.
+     * Assigns one Kong ACL group and maps the outcome onto a result row.
      */
-    private Wso2UserMigrationResult skippedResult(Wso2UserMigrationUserRequest user,
-                                                  Wso2UserMigrationRoleRequest role,
-                                                  String message) {
+    private Wso2UserMigrationResult assignRole(Wso2UserMigrationUserRequest user,
+                                               Wso2UserMigrationRoleRequest role,
+                                               KonnectCredentials credentials,
+                                               String consumerRef,
+                                               String migrationStatus) {
+        if (role == null || !StringUtils.hasText(role.getKongRoleName())) {
+            return buildResult(user, role, migrationStatus, STATUS_FAILED, INVALID_MAPPING_REASON);
+        }
+        try {
+            KongAdminClient.WriteOutcome outcome =
+                    kongAdminClient.assignGroup(credentials, consumerRef, role.getKongRoleName());
+            String assignmentStatus = outcome == KongAdminClient.WriteOutcome.CREATED
+                    ? STATUS_SUCCESS : STATUS_ALREADY_EXISTS;
+            return buildResult(user, role, migrationStatus, assignmentStatus, null);
+        } catch (RuntimeException ex) {
+            return buildResult(user, role, migrationStatus, STATUS_FAILED,
+                    failureMessage("Kong role assignment failed", ex));
+        }
+    }
+
+    /**
+     * Builds one FAILED row per role when the consumer could not be created.
+     */
+    private List<Wso2UserMigrationResult> failedRowsForUser(Wso2UserMigrationUserRequest user, String message) {
+        if (user.getRoles() == null || user.getRoles().isEmpty()) {
+            return List.of(buildResult(user, null, STATUS_FAILED, STATUS_FAILED, message));
+        }
+        return user.getRoles().stream()
+                .map(role -> buildResult(user, role, STATUS_FAILED, STATUS_FAILED, message))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Builds one user-role result row.
+     */
+    private Wso2UserMigrationResult buildResult(Wso2UserMigrationUserRequest user,
+                                                Wso2UserMigrationRoleRequest role,
+                                                String migrationStatus,
+                                                String assignmentStatus,
+                                                String errorMessage) {
         return Wso2UserMigrationResult.builder()
                 .userName(user.getUserName())
                 .userEmail(user.getUserEmail())
                 .wso2RoleName(role != null ? role.getWso2RoleName() : null)
                 .kongRoleName(role != null ? role.getKongRoleName() : null)
-                .migrationStatus("SKIPPED")
-                .assignmentStatus("SKIPPED")
-                .errorMessage(message)
+                .migrationStatus(migrationStatus)
+                .assignmentStatus(assignmentStatus)
+                .errorMessage(errorMessage)
                 .build();
+    }
+
+    /**
+     * Turns a Kong failure into a message naming the HTTP status and body,
+     * since a bare exception message hides which of auth, control plane or
+     * payload was actually wrong.
+     */
+    private String failureMessage(String prefix, RuntimeException ex) {
+        if (ex instanceof WebClientResponseException wcre) {
+            String body = wcre.getResponseBodyAsString();
+            if (StringUtils.hasText(body) && body.length() > MAX_ERROR_BODY) {
+                body = body.substring(0, MAX_ERROR_BODY) + "...";
+            }
+            return prefix + ": HTTP " + wcre.getStatusCode().value()
+                    + (StringUtils.hasText(body) ? " " + body : "");
+        }
+        return prefix + ": " + ex.getMessage();
     }
 
     /**
@@ -226,10 +297,9 @@ public class Wso2KongUserMigrationService {
      */
     private Wso2UserMigrationResponse buildResponse(Wso2UserMigrationRequest request,
                                                     List<Wso2UserMigrationResult> results) {
-        int success = (int) results.stream().filter(result -> "SUCCESS".equals(result.getMigrationStatus())).count();
-        int alreadyExists = (int) results.stream().filter(result -> "ALREADY_EXISTS".equals(result.getMigrationStatus())).count();
-        int failed = (int) results.stream().filter(result -> "FAILED".equals(result.getMigrationStatus())
-                || "SKIPPED".equals(result.getMigrationStatus())).count();
+        int success = (int) results.stream().filter(result -> STATUS_SUCCESS.equals(rowStatus(result))).count();
+        int alreadyExists = (int) results.stream().filter(result -> STATUS_ALREADY_EXISTS.equals(rowStatus(result))).count();
+        int failed = (int) results.stream().filter(result -> STATUS_FAILED.equals(rowStatus(result))).count();
         return Wso2UserMigrationResponse.builder()
                 .requestTransactionId(request.getRequestTransactionId())
                 .companyName(request.getCompanyName())
@@ -273,6 +343,30 @@ public class Wso2KongUserMigrationService {
                 .assignmentStatus(document.getAssignmentStatus())
                 .errorMessage(document.getErrorMessage())
                 .build();
+    }
+
+    /**
+     * Collapses one row down to a single outcome for the response counters.
+     *
+     * <p>A row covers two writes - the consumer and its ACL group - so either
+     * one failing makes the row a failure. A row only counts as ALREADY_EXISTS
+     * when nothing at all had to change; if the consumer was already there but
+     * the group was newly assigned, real work happened and it counts as
+     * success. A user with no mapped roles is judged on the consumer alone.
+     */
+    private String rowStatus(Wso2UserMigrationResult result) {
+        String migration = result.getMigrationStatus();
+        String assignment = result.getAssignmentStatus();
+        if (STATUS_FAILED.equals(migration) || STATUS_FAILED.equals(assignment)) {
+            return STATUS_FAILED;
+        }
+        if (STATUS_SKIPPED.equals(assignment)) {
+            return migration;
+        }
+        if (STATUS_ALREADY_EXISTS.equals(migration) && STATUS_ALREADY_EXISTS.equals(assignment)) {
+            return STATUS_ALREADY_EXISTS;
+        }
+        return STATUS_SUCCESS;
     }
 
     /**

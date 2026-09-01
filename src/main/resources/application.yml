@@ -96,11 +96,18 @@ forgeshift:
       role-permission-parallelism: ${WSO2_SOAP_ROLE_PERMISSION_PARALLELISM:5}
       max-role-permissions-per-role: ${WSO2_SOAP_MAX_ROLE_PERMISSIONS_PER_ROLE:10}
     kong:
-      base-url: ${KONG_ADMIN_BASE_URL:}
-      admin-token: ${KONG_ADMIN_TOKEN:}
-      consumer-path: ${KONG_CONSUMER_PATH:/consumers}
+      # Konnect credentials normally come from the kong_konnect_profiles
+      # collection written by the profile-config service; the *-fallback values
+      # below only apply when no profile matches the requesting company.
+      profiles-collection: ${KONG_KONNECT_PROFILES_COLLECTION:kong_konnect_profiles}
+      base-url-fallback: ${KONNECT_BASE_URL:https://us.api.konghq.com}
+      access-token-fallback: ${KONNECT_PAT:}
+      control-plane-id-fallback: ${KONNECT_CONTROL_PLANE_ID:}
+      consumers-path: ${KONG_CONSUMERS_PATH:/consumers}
       acl-path-template: ${KONG_ACL_PATH_TEMPLATE:/consumers/{consumer}/acls}
       request-timeout-seconds: ${KONG_REQUEST_TIMEOUT_SECONDS:30}
+      migrated-by-tag: ${KONG_MIGRATED_BY_TAG:migrated-by:forgeshift-wso2-migrator}
+      source-user-tag-prefix: ${KONG_SOURCE_USER_TAG_PREFIX:wso2-source-user}
     publisher-scope: apim:api_view
     admin-scope: apim:admin
     devportal-scope: apim:subscribe

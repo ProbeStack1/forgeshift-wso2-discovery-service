@@ -47,4 +47,24 @@ public class WebClientConfig {
                 .codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
     }
+
+    /**
+     * WebClient for the Kong Konnect management API.
+     *
+     * <p>Deliberately has no {@code baseUrl}: the Konnect host and control
+     * plane come from the per-company profile at request time, so callers pass
+     * absolute URLs. It also never trusts self-signed certs -- Konnect is a
+     * public endpoint with a valid chain, and the WSO2 client's dev-only
+     * insecure mode must not leak onto it.
+     */
+    @Bean(name = "konnectWebClient")
+    public WebClient konnectWebClient(Wso2Properties props) {
+        HttpClient http = HttpClient.create()
+                .responseTimeout(Duration.ofSeconds(props.getKong().getRequestTimeoutSeconds()));
+
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(http))
+                .codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+    }
 }

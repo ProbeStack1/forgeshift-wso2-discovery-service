@@ -14,6 +14,9 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = true)
 public class Wso2UserMigrationRequest extends DiscoverResourceRequest {
 
+    /** Kong Konnect profile to use; defaults to "primary" when omitted. */
+    private String profileName;
+    /** Control plane id or name, required when the profile has more than one. */
     private String kongControlPlane;
 
     @Valid

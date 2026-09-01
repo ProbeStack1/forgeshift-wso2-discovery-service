@@ -99,14 +99,32 @@ public class Wso2Properties {
     }
 
     /**
-     * Kong Admin API settings used by the WSO2-to-Kong migration endpoint.
+     * Kong Konnect settings used by the WSO2-to-Kong user migration endpoint.
+     *
+     * <p>Credentials normally come from the {@code kong_konnect_profiles}
+     * collection written by the profile-config service (same source the
+     * migration service reads). The {@code *Fallback} values below are only
+     * used when no profile matches the requested company/profile.
+     *
+     * <p>Note this targets <b>Konnect</b>, not a self-managed Kong Gateway:
+     * auth is {@code Authorization: Bearer <PAT>} and entity paths live under
+     * {@code /v2/control-planes/{cpId}/core-entities}.
      */
     @Data
     public static class Kong {
-        private String baseUrl;
-        private String adminToken;
-        private String consumerPath = "/consumers";
+        /** Konnect profile collection written by the profile-config service. */
+        private String profilesCollection = "kong_konnect_profiles";
+        /** Used only when no Konnect profile matches. */
+        private String baseUrlFallback = "https://us.api.konghq.com";
+        private String accessTokenFallback;
+        private String controlPlaneIdFallback;
+        private String consumersPath = "/consumers";
+        /** {@code {consumer}} is replaced with the consumer id or username. */
         private String aclPathTemplate = "/consumers/{consumer}/acls";
         private int requestTimeoutSeconds = 30;
+        /** Stamped on every consumer this service creates, matching migration-service convention. */
+        private String migratedByTag = "migrated-by:forgeshift-wso2-migrator";
+        /** Prefix for the tag recording which WSO2 user a consumer came from. */
+        private String sourceUserTagPrefix = "wso2-source-user";
     }
 }
