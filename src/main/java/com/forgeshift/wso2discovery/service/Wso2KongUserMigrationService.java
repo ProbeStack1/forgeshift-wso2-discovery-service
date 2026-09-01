@@ -56,12 +56,13 @@ public class Wso2KongUserMigrationService {
             // Step 1: Validate request
             validateMigrationRequest(request);
 
-            // Step 2: Resolve the target Kong Konnect control plane for this company
-            KonnectCredentials credentials = konnectProfileReader.resolve(
+            // Step 2: Resolve the target control planes. Users are org-wide, so
+            // with none named this is every control plane on the profile.
+            List<KonnectCredentials> targets = konnectProfileReader.resolveTargets(
                     request.getCompanyName(), request.getProfileName(), request.getKongControlPlane());
 
-            // Step 3: Create consumers and assign ACL groups in Kong
-            List<Wso2UserMigrationResult> results = processUsers(request, credentials);
+            // Step 3: Create consumers and assign ACL groups in each control plane
+            List<Wso2UserMigrationResult> results = processTargets(request, targets);
 
             // Step 4: Save one migration status document per user-role
             saveResults(request, results);
@@ -128,15 +129,33 @@ public class Wso2KongUserMigrationService {
     }
 
     /**
-     * Processes every requested user against the Kong Konnect control plane.
+     * Applies the whole user set to every target control plane.
+     *
+     * <p>A user is not scoped to one environment, so the same person is created
+     * in each control plane. One row is produced per user, role and control
+     * plane, which is what the status collection is keyed on.
      */
-    private List<Wso2UserMigrationResult> processUsers(Wso2UserMigrationRequest request,
-                                                       KonnectCredentials credentials) {
+    private List<Wso2UserMigrationResult> processTargets(Wso2UserMigrationRequest request,
+                                                         List<KonnectCredentials> targets) {
         List<Wso2UserMigrationResult> results = new ArrayList<>();
-        for (Wso2UserMigrationUserRequest user : request.getUsers()) {
-            results.addAll(processUser(user, request.getWso2Tenant(), credentials));
+        for (KonnectCredentials credentials : targets) {
+            logTarget(request, credentials);
+            for (Wso2UserMigrationUserRequest user : request.getUsers()) {
+                results.addAll(processUser(user, request.getWso2Tenant(), credentials));
+            }
         }
         return results;
+    }
+
+    /**
+     * Records which control plane a batch is being applied to, so a run
+     * spanning several is traceable in the logs.
+     */
+    private void logTarget(Wso2UserMigrationRequest request, KonnectCredentials credentials) {
+        log.info("[WSO2-KONG-USER-MIGRATION] eventType=wso2_kong_user_migration_control_plane companyName={} "
+                        + "requestTransactionId={} controlPlaneId={} controlPlaneName={} userCount={}",
+                request.getCompanyName(), request.getRequestTransactionId(),
+                credentials.getControlPlaneId(), credentials.getControlPlaneName(), request.getUsers().size());
     }
 
     /**
@@ -157,7 +176,7 @@ public class Wso2KongUserMigrationService {
         } catch (RuntimeException ex) {
             // The consumer is a prerequisite for every ACL, so a failure here
             // fails all rows for that user instead of half-applying them.
-            return failedRowsForUser(user, failureMessage("Kong consumer creation failed", ex));
+            return failedRowsForUser(credentials, user, failureMessage("Kong consumer creation failed", ex));
         }
 
         String migrationStatus = consumer.getOutcome() == KongAdminClient.WriteOutcome.CREATED
@@ -168,7 +187,7 @@ public class Wso2KongUserMigrationService {
         String consumerRef = StringUtils.hasText(consumer.getId()) ? consumer.getId() : consumer.getUsername();
 
         if (user.getRoles() == null || user.getRoles().isEmpty()) {
-            return List.of(buildResult(user, null, migrationStatus, STATUS_SKIPPED, NO_ROLES_REASON));
+            return List.of(buildResult(credentials, user, null, migrationStatus, STATUS_SKIPPED, NO_ROLES_REASON));
         }
 
         List<Wso2UserMigrationResult> rows = new ArrayList<>();
@@ -187,16 +206,16 @@ public class Wso2KongUserMigrationService {
                                                String consumerRef,
                                                String migrationStatus) {
         if (role == null || !StringUtils.hasText(role.getKongRoleName())) {
-            return buildResult(user, role, migrationStatus, STATUS_FAILED, INVALID_MAPPING_REASON);
+            return buildResult(credentials, user, role, migrationStatus, STATUS_FAILED, INVALID_MAPPING_REASON);
         }
         try {
             KongAdminClient.WriteOutcome outcome =
                     kongAdminClient.assignGroup(credentials, consumerRef, role.getKongRoleName());
             String assignmentStatus = outcome == KongAdminClient.WriteOutcome.CREATED
                     ? STATUS_SUCCESS : STATUS_ALREADY_EXISTS;
-            return buildResult(user, role, migrationStatus, assignmentStatus, null);
+            return buildResult(credentials, user, role, migrationStatus, assignmentStatus, null);
         } catch (RuntimeException ex) {
-            return buildResult(user, role, migrationStatus, STATUS_FAILED,
+            return buildResult(credentials, user, role, migrationStatus, STATUS_FAILED,
                     failureMessage("Kong role assignment failed", ex));
         }
     }
@@ -204,24 +223,29 @@ public class Wso2KongUserMigrationService {
     /**
      * Builds one FAILED row per role when the consumer could not be created.
      */
-    private List<Wso2UserMigrationResult> failedRowsForUser(Wso2UserMigrationUserRequest user, String message) {
+    private List<Wso2UserMigrationResult> failedRowsForUser(KonnectCredentials credentials,
+                                                            Wso2UserMigrationUserRequest user,
+                                                            String message) {
         if (user.getRoles() == null || user.getRoles().isEmpty()) {
-            return List.of(buildResult(user, null, STATUS_FAILED, STATUS_FAILED, message));
+            return List.of(buildResult(credentials, user, null, STATUS_FAILED, STATUS_FAILED, message));
         }
         return user.getRoles().stream()
-                .map(role -> buildResult(user, role, STATUS_FAILED, STATUS_FAILED, message))
+                .map(role -> buildResult(credentials, user, role, STATUS_FAILED, STATUS_FAILED, message))
                 .collect(Collectors.toList());
     }
 
     /**
      * Builds one user-role result row.
      */
-    private Wso2UserMigrationResult buildResult(Wso2UserMigrationUserRequest user,
+    private Wso2UserMigrationResult buildResult(KonnectCredentials credentials,
+                                                Wso2UserMigrationUserRequest user,
                                                 Wso2UserMigrationRoleRequest role,
                                                 String migrationStatus,
                                                 String assignmentStatus,
                                                 String errorMessage) {
         return Wso2UserMigrationResult.builder()
+                .kongControlPlane(credentials.getControlPlaneId())
+                .kongControlPlaneName(credentials.getControlPlaneName())
                 .userName(user.getUserName())
                 .userEmail(user.getUserEmail())
                 .wso2RoleName(role != null ? role.getWso2RoleName() : null)
@@ -266,10 +290,14 @@ public class Wso2KongUserMigrationService {
     private Wso2KongUserMigrationDocument toDocument(Wso2UserMigrationRequest request,
                                                      Wso2UserMigrationResult result,
                                                      Instant now) {
+        // The control plane is part of the key: the same user and role is now
+        // applied to every control plane, and without it those rows would
+        // share an id and overwrite each other, leaving only the last one.
         String id = String.join("|",
                 request.getCompanyName(),
                 request.getWso2Tenant(),
                 request.getRequestTransactionId(),
+                safe(result.getKongControlPlane()),
                 safe(result.getUserName()),
                 safe(result.getKongRoleName()));
         return Wso2KongUserMigrationDocument.builder()
@@ -281,7 +309,8 @@ public class Wso2KongUserMigrationService {
                 .wso2Tenant(request.getWso2Tenant())
                 .environment(request.getEnvironment())
                 .requestTransactionId(request.getRequestTransactionId())
-                .kongControlPlane(defaultIfBlank(request.getKongControlPlane(), "default"))
+                .kongControlPlane(defaultIfBlank(result.getKongControlPlane(),
+                        defaultIfBlank(request.getKongControlPlane(), "default")))
                 .userName(result.getUserName())
                 .userEmail(result.getUserEmail())
                 .wso2RoleName(result.getWso2RoleName())
@@ -338,6 +367,7 @@ public class Wso2KongUserMigrationService {
      */
     private Wso2UserMigrationResult toResult(Wso2KongUserMigrationDocument document) {
         return Wso2UserMigrationResult.builder()
+                .kongControlPlane(document.getKongControlPlane())
                 .userName(document.getUserName())
                 .userEmail(document.getUserEmail())
                 .wso2RoleName(document.getWso2RoleName())

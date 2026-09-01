@@ -41,15 +41,40 @@ class KonnectProfileReaderTest {
 
     @Test
     void treatsDefaultPlaceholderAsUnspecifiedForASingleControlPlane() {
-        // The w2k UI reads localStorage "kongControlPlane", which nothing sets,
-        // so it always posts the literal string "default". Looking that up as a
-        // real control plane name would fail every migration.
+        // The w2k UI posted the literal string "default" from a localStorage
+        // key nothing ever wrote. Looking that up as a real control plane name
+        // would fail every migration.
         stubProfile(controlPlane("cp-1234", "probestack-wso2-kong"));
 
-        KonnectCredentials creds = reader.resolve("probestack", "primary", "default");
+        List<KonnectCredentials> targets = reader.resolveTargets("probestack", "primary", "default");
 
-        assertEquals("cp-1234", creds.getControlPlaneId());
-        assertEquals("profile", creds.getSource());
+        assertEquals(1, targets.size());
+        assertEquals("cp-1234", targets.get(0).getControlPlaneId());
+        assertEquals("profile", targets.get(0).getSource());
+    }
+
+    @Test
+    void targetsEveryControlPlaneWhenNoneIsNamed() {
+        // A migrated user is not environment-specific: the same person belongs
+        // in every control plane, so this must not ask the caller to choose.
+        stubProfile(
+                controlPlane("cp-1234", "probestack-wso2-kong"),
+                controlPlane("cp-5678", "probestack-staging"),
+                controlPlane("cp-9012", "probestack-dev"));
+
+        assertEquals(List.of("cp-1234", "cp-5678", "cp-9012"),
+                reader.resolveTargets("probestack", "primary", "default").stream()
+                        .map(KonnectCredentials::getControlPlaneId).toList());
+        assertEquals(3, reader.resolveTargets("probestack", "primary", null).size());
+        assertEquals(3, reader.resolveTargets("probestack", "primary", "all").size());
+    }
+
+    @Test
+    void carriesTheControlPlaneNameThroughForReporting() {
+        stubProfile(controlPlane("cp-1234", "probestack-wso2-kong"));
+
+        assertEquals("probestack-wso2-kong",
+                reader.resolveTargets("probestack", "primary", null).get(0).getControlPlaneName());
     }
 
     @Test
@@ -60,9 +85,10 @@ class KonnectProfileReaderTest {
                 controlPlane("cp-real-default", "default"),
                 controlPlane("cp-other", "probestack-wso2-kong"));
 
-        KonnectCredentials creds = reader.resolve("probestack", "primary", "default");
+        List<KonnectCredentials> targets = reader.resolveTargets("probestack", "primary", "default");
 
-        assertEquals("cp-real-default", creds.getControlPlaneId());
+        assertEquals(1, targets.size());
+        assertEquals("cp-real-default", targets.get(0).getControlPlaneId());
     }
 
     @Test
@@ -71,10 +97,13 @@ class KonnectProfileReaderTest {
                 controlPlane("cp-1234", "probestack-wso2-kong"),
                 controlPlane("cp-5678", "probestack-staging"));
 
-        assertEquals("cp-5678",
-                reader.resolve("probestack", "primary", "probestack-staging").getControlPlaneId());
-        assertEquals("cp-1234",
-                reader.resolve("probestack", "primary", "cp-1234").getControlPlaneId());
+        // Naming one narrows the run to it.
+        assertEquals(List.of("cp-5678"),
+                reader.resolveTargets("probestack", "primary", "probestack-staging").stream()
+                        .map(KonnectCredentials::getControlPlaneId).toList());
+        assertEquals(List.of("cp-1234"),
+                reader.resolveTargets("probestack", "primary", "cp-1234").stream()
+                        .map(KonnectCredentials::getControlPlaneId).toList());
     }
 
     @Test
@@ -82,21 +111,9 @@ class KonnectProfileReaderTest {
         stubProfile(controlPlane("cp-1234", "probestack-wso2-kong"));
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> reader.resolve("probestack", "primary", "does-not-exist"));
-        assertEquals("Control Plane not found in Kong Konnect profile: does-not-exist", ex.getMessage());
-    }
-
-    @Test
-    void asksForAChoiceWhenThePlaceholderIsAmbiguous() {
-        stubProfile(
-                controlPlane("cp-1234", "probestack-wso2-kong"),
-                controlPlane("cp-5678", "probestack-staging"));
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> reader.resolve("probestack", "primary", "default"));
-        // An actionable message beats silently picking the wrong control plane.
-        assertEquals("Multiple Kong control planes found. Pass kongControlPlane to select the target control plane.",
-                ex.getMessage());
+                () -> reader.resolveTargets("probestack", "primary", "does-not-exist"));
+        assertEquals("Control Plane not found in Kong Konnect profile: does-not-exist"
+                + ". Available: probestack-wso2-kong (cp-1234)", ex.getMessage());
     }
 
     @Test
@@ -106,10 +123,11 @@ class KonnectProfileReaderTest {
         props.getKong().setControlPlaneIdFallback("cp-from-config");
         KonnectProfileReader fallbackReader = new KonnectProfileReader(mongoTemplate, props);
 
-        KonnectCredentials creds = fallbackReader.resolve("probestack", "primary", "default");
+        List<KonnectCredentials> targets = fallbackReader.resolveTargets("probestack", "primary", "default");
 
-        assertEquals("cp-from-config", creds.getControlPlaneId());
-        assertEquals("static", creds.getSource());
+        assertEquals(1, targets.size());
+        assertEquals("cp-from-config", targets.get(0).getControlPlaneId());
+        assertEquals("static", targets.get(0).getSource());
     }
 
     private void stubProfile(Document... controlPlanes) {

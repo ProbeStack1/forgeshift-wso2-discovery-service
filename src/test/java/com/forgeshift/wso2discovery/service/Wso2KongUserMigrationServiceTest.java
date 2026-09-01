@@ -59,7 +59,7 @@ class Wso2KongUserMigrationServiceTest {
     @BeforeEach
     void setUp() {
         service = new Wso2KongUserMigrationService(repository, kongAdminClient, konnectProfileReader);
-        when(konnectProfileReader.resolve(any(), any(), any())).thenReturn(CREDENTIALS);
+        when(konnectProfileReader.resolveTargets(any(), any(), any())).thenReturn(List.of(CREDENTIALS));
     }
 
     @Test
@@ -127,6 +127,59 @@ class Wso2KongUserMigrationServiceTest {
         verify(kongAdminClient, org.mockito.Mockito.times(1))
                 .ensureConsumer(any(), eq("carbon.super"), eq("api.developer"));
         verify(kongAdminClient, org.mockito.Mockito.times(2)).assignGroup(any(), any(), any());
+    }
+
+    @Test
+    void migrateUsers_appliesEveryUserToEveryControlPlane() {
+        // A user is not environment-specific, so one request covers all planes.
+        KonnectCredentials staging = KonnectCredentials.builder()
+                .konnectBaseUrl("https://us.api.konghq.com")
+                .konnectAccessToken("kpat_test")
+                .controlPlaneId("cp-5678")
+                .controlPlaneName("probestack-staging")
+                .build();
+        when(konnectProfileReader.resolveTargets(any(), any(), any()))
+                .thenReturn(List.of(CREDENTIALS, staging));
+        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
+        when(kongAdminClient.assignGroup(any(), any(), any()))
+                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
+
+        Wso2UserMigrationResponse response =
+                service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
+
+        // One user, one role, two control planes.
+        assertEquals(2, response.getTotalRequested());
+        assertEquals(2, response.getTotalSuccess());
+        assertEquals("SUCCESS", response.getOverallStatus());
+        assertEquals(List.of("cp-1234", "cp-5678"),
+                response.getResults().stream().map(Wso2UserMigrationResult::getKongControlPlane).toList());
+        verify(kongAdminClient).ensureConsumer(eq(CREDENTIALS), any(), any());
+        verify(kongAdminClient).ensureConsumer(eq(staging), any(), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void migrateUsers_keepsPerControlPlaneRowsDistinctInStorage() {
+        KonnectCredentials staging = KonnectCredentials.builder()
+                .konnectBaseUrl("https://us.api.konghq.com")
+                .konnectAccessToken("kpat_test")
+                .controlPlaneId("cp-5678")
+                .build();
+        when(konnectProfileReader.resolveTargets(any(), any(), any()))
+                .thenReturn(List.of(CREDENTIALS, staging));
+        stubConsumer(KongAdminClient.WriteOutcome.CREATED, "consumer-uuid");
+        when(kongAdminClient.assignGroup(any(), any(), any()))
+                .thenReturn(KongAdminClient.WriteOutcome.CREATED);
+
+        service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
+
+        ArgumentCaptor<List<Wso2KongUserMigrationDocument>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository).upsertAll(captor.capture());
+        // Same user and role in two planes must not collide on the document id,
+        // or only the last control plane would survive the upsert.
+        assertEquals(2, captor.getValue().stream().map(Wso2KongUserMigrationDocument::getId).distinct().count());
+        assertEquals(List.of("cp-1234", "cp-5678"),
+                captor.getValue().stream().map(Wso2KongUserMigrationDocument::getKongControlPlane).toList());
     }
 
     @Test

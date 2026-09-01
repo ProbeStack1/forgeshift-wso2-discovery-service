@@ -37,48 +37,97 @@ public class KonnectProfileReader {
     private final Wso2Properties props;
 
     /**
-     * Resolves Konnect credentials for one company / profile / control plane.
+     * Resolves every Kong Konnect control plane a request should be applied to.
+     *
+     * <p>A migrated <i>user</i> is not environment-specific the way an API is:
+     * the same person exists across the organisation, so with no control plane
+     * named the answer is <b>all</b> of the profile's control planes rather
+     * than an error. Naming one narrows the run to it.
+     *
+     * @return one credentials entry per target control plane, never empty
      */
-    public KonnectCredentials resolve(String companyName, String profileName, String requestedControlPlaneId) {
+    public List<KonnectCredentials> resolveTargets(String companyName, String profileName,
+                                                   String requestedControlPlaneId) {
         if (StringUtils.hasText(companyName)) {
             String desiredName = StringUtils.hasText(profileName) ? profileName : "primary";
             Document doc = findProfile(companyName, desiredName);
             if (doc != null) {
-                Document controlPlane = selectedControlPlane(doc, requestedControlPlaneId);
                 log.debug("Using Kong Konnect profile (company={}, profileName={})", companyName, desiredName);
-                return KonnectCredentials.builder()
-                        .source("profile")
-                        .konnectBaseUrl(firstString(doc, "adminUrl", "konnectBaseUrl"))
-                        .konnectAccessToken(firstString(doc, "konnectPat", "konnectAccessToken"))
-                        .controlPlaneId(controlPlaneId(doc, controlPlane))
-                        .controlPlaneName(controlPlaneName(doc, controlPlane))
-                        .build();
+                String baseUrl = firstString(doc, "adminUrl", "konnectBaseUrl");
+                String accessToken = firstString(doc, "konnectPat", "konnectAccessToken");
+                List<Document> controlPlanes = controlPlaneDocs(doc);
+                if (controlPlanes.isEmpty()) {
+                    // Older profiles carry the id on the profile itself.
+                    return List.of(credentials("profile", baseUrl, accessToken,
+                            doc.getString("controlPlaneId"), doc.getString("controlPlaneName")));
+                }
+                return targetControlPlanes(controlPlanes, requestedControlPlaneId).stream()
+                        .map(cp -> credentials("profile", baseUrl, accessToken,
+                                cp.getString("controlPlaneId"), controlPlaneName(doc, cp)))
+                        .toList();
             }
         }
         log.debug("No Kong Konnect profile found for company={} - using static fallback", companyName);
+        return List.of(credentials("static",
+                props.getKong().getBaseUrlFallback(),
+                props.getKong().getAccessTokenFallback(),
+                isUnspecified(requestedControlPlaneId)
+                        ? props.getKong().getControlPlaneIdFallback() : requestedControlPlaneId,
+                null));
+    }
+
+    /**
+     * Narrows to the requested control plane, or returns them all when none was
+     * named.
+     */
+    private static List<Document> targetControlPlanes(List<Document> controlPlanes, String requestedControlPlaneId) {
+        if (StringUtils.hasText(requestedControlPlaneId)) {
+            Optional<Document> match = controlPlanes.stream()
+                    .filter(cp -> requestedControlPlaneId.equals(cp.getString("controlPlaneId"))
+                            || requestedControlPlaneId.equals(cp.getString("controlPlaneName"))
+                            || requestedControlPlaneId.equals(cp.getString("name")))
+                    .findFirst();
+            if (match.isPresent()) {
+                return List.of(match.get());
+            }
+            // Asking for a plane that does not exist is an error, unless the
+            // value is a placeholder meaning "unspecified".
+            if (!isUnspecified(requestedControlPlaneId)) {
+                throw new IllegalArgumentException(
+                        "Control Plane not found in Kong Konnect profile: " + requestedControlPlaneId
+                                + ". Available: " + describe(controlPlanes));
+            }
+        }
+        return controlPlanes;
+    }
+
+    private static KonnectCredentials credentials(String source, String baseUrl, String accessToken,
+                                                  String controlPlaneId, String controlPlaneName) {
         return KonnectCredentials.builder()
-                .source("static")
-                .konnectBaseUrl(props.getKong().getBaseUrlFallback())
-                .konnectAccessToken(props.getKong().getAccessTokenFallback())
-                .controlPlaneId(isUnspecified(requestedControlPlaneId)
-                        ? props.getKong().getControlPlaneIdFallback() : requestedControlPlaneId)
+                .source(source)
+                .konnectBaseUrl(baseUrl)
+                .konnectAccessToken(accessToken)
+                .controlPlaneId(controlPlaneId)
+                .controlPlaneName(controlPlaneName)
                 .build();
     }
 
     /**
-     * Treats the legacy {@code "default"} placeholder as "no control plane
+     * Treats {@code "default"} and {@code "all"} as "no control plane
      * requested".
      *
      * <p>Callers have long sent {@code kongControlPlane: "default"} to mean
-     * "unspecified" - the w2k UI still does, and the migration status document
-     * uses the same placeholder. Once that value started selecting a control
-     * plane it would otherwise be looked up as a real name and fail every
-     * request. A control plane genuinely named "default" still wins, because
-     * matching is attempted before this fallback applies.
+     * "unspecified" - the w2k UI did so from a localStorage key nothing ever
+     * wrote, and the migration status document uses the same placeholder.
+     * A control plane genuinely named "default" still wins, because matching
+     * is attempted before this fallback applies.
      */
     private static boolean isUnspecified(String requestedControlPlaneId) {
-        return !StringUtils.hasText(requestedControlPlaneId)
-                || "default".equalsIgnoreCase(requestedControlPlaneId.trim());
+        if (!StringUtils.hasText(requestedControlPlaneId)) {
+            return true;
+        }
+        String trimmed = requestedControlPlaneId.trim();
+        return "default".equalsIgnoreCase(trimmed) || "all".equalsIgnoreCase(trimmed);
     }
 
     /**
@@ -111,38 +160,35 @@ public class KonnectProfileReader {
     }
 
     /**
-     * Picks the requested control plane, or the only one when unambiguous.
+     * Reads the profile's control planes as documents, empty when absent.
      */
-    private static Document selectedControlPlane(Document doc, String requestedControlPlaneId) {
+    private static List<Document> controlPlaneDocs(Document doc) {
         Object value = doc.get("controlPlanes");
         if (!(value instanceof List<?> controlPlanes) || controlPlanes.isEmpty()) {
-            return null;
+            return List.of();
         }
-        List<Document> docs = controlPlanes.stream()
+        return controlPlanes.stream()
                 .map(KonnectProfileReader::asDocument)
                 .filter(Objects::nonNull)
                 .toList();
-        if (StringUtils.hasText(requestedControlPlaneId)) {
-            Optional<Document> match = docs.stream()
-                    .filter(cp -> requestedControlPlaneId.equals(cp.getString("controlPlaneId"))
-                            || requestedControlPlaneId.equals(cp.getString("controlPlaneName"))
-                            || requestedControlPlaneId.equals(cp.getString("name")))
-                    .findFirst();
-            if (match.isPresent()) {
-                return match.get();
-            }
-            // Asking for a plane that does not exist is an error, unless the
-            // value is the "default" placeholder that means "unspecified".
-            if (!isUnspecified(requestedControlPlaneId)) {
-                throw new IllegalArgumentException(
-                        "Control Plane not found in Kong Konnect profile: " + requestedControlPlaneId);
-            }
-        }
-        if (docs.size() == 1) {
-            return docs.get(0);
-        }
-        throw new IllegalArgumentException(
-                "Multiple Kong control planes found. Pass kongControlPlane to select the target control plane.");
+    }
+
+    /**
+     * Renders the selectable control planes as {@code name (id)} so the error
+     * carries the values the caller can actually pass back.
+     */
+    private static String describe(List<Document> controlPlanes) {
+        return controlPlanes.stream()
+                .map(cp -> {
+                    String name = cp.getString("controlPlaneName") != null
+                            ? cp.getString("controlPlaneName") : cp.getString("name");
+                    String id = cp.getString("controlPlaneId");
+                    if (!StringUtils.hasText(name)) {
+                        return String.valueOf(id);
+                    }
+                    return StringUtils.hasText(id) ? name + " (" + id + ")" : name;
+                })
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private static Document asDocument(Object value) {
