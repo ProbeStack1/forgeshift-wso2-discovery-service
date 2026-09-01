@@ -2,7 +2,6 @@ package com.forgeshift.wso2discovery.client;
 
 import com.forgeshift.wso2discovery.config.Wso2Properties;
 import com.forgeshift.wso2discovery.dto.Wso2RolePermissionDetail;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpHeaders;
@@ -32,14 +31,28 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class Wso2UserStoreSoapClient {
 
     private static final String SOAP_ENV = "http://schemas.xmlsoap.org/soap/envelope/";
 
-    @Qualifier("wso2WebClient")
     private final WebClient webClient;
     private final Wso2Properties properties;
+
+    /**
+     * Declared explicitly rather than left to {@code @RequiredArgsConstructor}.
+     * Lombok does not copy a field-level {@code @Qualifier} onto the generated
+     * constructor parameter unless {@code lombok.copyableAnnotations} says so,
+     * and this project has no {@code lombok.config}. With more than one
+     * WebClient bean an unqualified parameter fails the whole application
+     * context at startup, which surfaces only as a deployment that never
+     * becomes ready. {@link Wso2Client} and {@code KongAdminClient} declare
+     * theirs the same way.
+     */
+    public Wso2UserStoreSoapClient(@Qualifier("wso2WebClient") WebClient webClient,
+                                   Wso2Properties properties) {
+        this.webClient = webClient;
+        this.properties = properties;
+    }
 
     /**
      * Calls SOAP listUsers and returns the user names from return elements.
