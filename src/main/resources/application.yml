@@ -108,6 +108,12 @@ forgeshift:
       request-timeout-seconds: ${KONG_REQUEST_TIMEOUT_SECONDS:30}
       migrated-by-tag: ${KONG_MIGRATED_BY_TAG:migrated-by:forgeshift-wso2-migrator}
       source-user-tag-prefix: ${KONG_SOURCE_USER_TAG_PREFIX:wso2-source-user}
+      tenant-tag-prefix: ${KONG_TENANT_TAG_PREFIX:wso2-tenant}
+      principal-type-tag: ${KONG_PRINCIPAL_TYPE_TAG:principal-type:user}
+      # Keeps migrated users out of the consumer namespace the migration
+      # service uses for WSO2 applications. Usernames become
+      # <prefix>.<tenant>.<user>, e.g. user.carbon-super.api-developer.
+      consumer-username-prefix: ${KONG_CONSUMER_USERNAME_PREFIX:user}
     publisher-scope: apim:api_view
     admin-scope: apim:admin
     devportal-scope: apim:subscribe

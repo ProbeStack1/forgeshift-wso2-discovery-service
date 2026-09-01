@@ -64,7 +64,7 @@ class KongAdminClientTest {
         nextStatus = 201;
         nextBody = "{\"id\":\"consumer-uuid\",\"username\":\"api.developer\"}";
 
-        KongAdminClient.ConsumerRef ref = client.ensureConsumer(credentials, "api.developer", "dev@example.com");
+        KongAdminClient.ConsumerRef ref = client.ensureConsumer(credentials, "carbon.super", "api.developer");
 
         assertEquals("consumer-uuid", ref.getId());
         assertEquals(KongAdminClient.WriteOutcome.CREATED, ref.getOutcome());
@@ -79,13 +79,13 @@ class KongAdminClientTest {
         nextStatus = 201;
         nextBody = "{\"id\":\"consumer-uuid\"}";
 
-        client.ensureConsumer(credentials, "api.developer", null);
+        client.ensureConsumer(credentials, "carbon.super", "api.developer");
 
         String body = requestBodies.get(0);
         assertTrue(body.contains("migrated-by:forgeshift-wso2-migrator"), body);
         assertTrue(body.contains("wso2-source-user:api.developer"), body);
-        // custom_id falls back to the username when no email is supplied.
-        assertTrue(body.contains("\"custom_id\":\"api.developer\""), body);
+        assertTrue(body.contains("wso2-tenant:carbon.super"), body);
+        assertTrue(body.contains("principal-type:user"), body);
     }
 
     @Test
@@ -95,12 +95,12 @@ class KongAdminClientTest {
         nextBody = "{\"message\":\"UNIQUE violation detected on '{username=\\\"api.developer\\\"}' "
                 + "(type: unique) constraint failed\"}";
 
-        KongAdminClient.ConsumerRef ref = client.ensureConsumer(credentials, "api.developer", null);
+        KongAdminClient.ConsumerRef ref = client.ensureConsumer(credentials, "carbon.super", "api.developer");
 
         assertEquals(KongAdminClient.WriteOutcome.ALREADY_EXISTS, ref.getOutcome());
         // POST then GET /consumers/api.developer to adopt the existing one.
         assertEquals(2, requestedPaths.size());
-        assertEquals("/v2/control-planes/cp-1234/core-entities/consumers/api.developer", requestedPaths.get(1));
+        assertEquals("/v2/control-planes/cp-1234/core-entities/consumers/user.carbon-super.api-developer", requestedPaths.get(1));
     }
 
     @Test
@@ -109,7 +109,7 @@ class KongAdminClientTest {
         nextBody = "{\"message\":\"Unauthorized\"}";
 
         WebClientResponseException ex = assertThrows(WebClientResponseException.class,
-                () -> client.ensureConsumer(credentials, "api.developer", null));
+                () -> client.ensureConsumer(credentials, "carbon.super", "api.developer"));
 
         assertEquals(401, ex.getStatusCode().value());
         // A 401 must not be mistaken for an existing consumer.
@@ -153,6 +153,50 @@ class KongAdminClientTest {
     }
 
     @Test
+    void consumerUsername_namespacesUsersAwayFromApplications() {
+        // The migration service names an application consumer slug(appName),
+        // so a WSO2 app called "Admin" lands on "admin". A user called "admin"
+        // must not land there too.
+        assertEquals("user.carbon-super.admin", client.consumerUsername("carbon.super", "admin"));
+    }
+
+    @Test
+    void consumerUsername_keepsTheSameNameInTwoTenantsApart() {
+        assertEquals("user.carbon-super.admin", client.consumerUsername("carbon.super", "admin"));
+        assertEquals("user.acme-org.admin", client.consumerUsername("acme.org", "admin"));
+    }
+
+    @Test
+    void consumerUsername_slugifiesEachSegment() {
+        assertEquals("user.carbon-super.api-developer",
+                client.consumerUsername("carbon.super", "API.Developer"));
+        // Separator dots survive because a slug can never contain one.
+        assertEquals(3, client.consumerUsername("carbon.super", "api.developer").split("\\.").length);
+    }
+
+    @Test
+    void consumerUsername_honoursABlankPrefix() {
+        Wso2Properties unprefixed = new Wso2Properties();
+        unprefixed.getKong().setConsumerUsernamePrefix("");
+        KongAdminClient plain = new KongAdminClient(WebClient.builder().build(), unprefixed);
+
+        assertEquals("carbon-super.admin", plain.consumerUsername("carbon.super", "admin"));
+    }
+
+    @Test
+    void customId_isDerivedFromTenantAndUserNotEmail() {
+        nextStatus = 201;
+        nextBody = "{\"id\":\"consumer-uuid\"}";
+
+        client.ensureConsumer(credentials, "carbon.super", "api.developer");
+
+        // Kong requires custom_id unique. Two WSO2 users sharing a mailbox
+        // would collide if this were the email, leaving the second unmigrated.
+        assertTrue(requestBodies.get(0).contains("\"custom_id\":\"wso2:user:carbon.super:api.developer\""),
+                requestBodies.get(0));
+    }
+
+    @Test
     void failsFastWhenControlPlaneIsMissing() {
         KonnectCredentials incomplete = KonnectCredentials.builder()
                 .konnectBaseUrl("http://localhost:1")
@@ -160,7 +204,7 @@ class KongAdminClientTest {
                 .build();
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> client.ensureConsumer(incomplete, "api.developer", null));
+                () -> client.ensureConsumer(incomplete, "carbon.super", "api.developer"));
         assertTrue(ex.getMessage().contains("control plane id"), ex.getMessage());
     }
 

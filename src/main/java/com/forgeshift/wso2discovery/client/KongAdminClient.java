@@ -64,31 +64,74 @@ public class KongAdminClient {
     /**
      * Creates the Kong consumer for one WSO2 user, adopting an existing
      * consumer of the same username instead of failing.
+     *
+     * <p>A control plane has a single consumer list, unique on both username
+     * and custom_id, and the migration service already fills it with WSO2
+     * <i>applications</i>. Identity is therefore qualified rather than taken
+     * raw from WSO2: the username is namespaced by principal type and tenant,
+     * and the custom_id is a fully qualified source key. Passing a raw
+     * username would let a user called {@code admin} collide with an
+     * application called {@code admin}, and let the same username in two
+     * tenants collapse into one consumer.
      */
-    public ConsumerRef ensureConsumer(KonnectCredentials creds, String userName, String customId) {
+    public ConsumerRef ensureConsumer(KonnectCredentials creds, String wso2Tenant, String userName) {
         validateConfigured(creds);
+        String username = consumerUsername(wso2Tenant, userName);
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("username", userName);
-        payload.put("custom_id", StringUtils.hasText(customId) ? customId : userName);
-        payload.put("tags", consumerTags(userName));
+        payload.put("username", username);
+        payload.put("custom_id", consumerCustomId(wso2Tenant, userName));
+        payload.put("tags", consumerTags(wso2Tenant, userName));
         try {
             Map<String, Object> body = post(creds, consumersEndpoint(creds), payload);
             return ConsumerRef.builder()
                     .id(body == null ? null : asString(body.get("id")))
-                    .username(userName)
+                    .username(username)
                     .outcome(WriteOutcome.CREATED)
                     .build();
         } catch (WebClientResponseException e) {
             if (!isUniqueConstraintError(e)) {
                 throw e;
             }
-            log.debug("Kong consumer {} already exists - adopting", userName);
+            log.debug("Kong consumer {} already exists - adopting", username);
             return ConsumerRef.builder()
-                    .id(findConsumerId(creds, userName))
-                    .username(userName)
+                    .id(findConsumerId(creds, username))
+                    .username(username)
                     .outcome(WriteOutcome.ALREADY_EXISTS)
                     .build();
         }
+    }
+
+    /**
+     * Builds the namespaced consumer username for one WSO2 user, for example
+     * {@code user.carbon-super.api-developer}.
+     *
+     * <p>Each segment is slugified the same way the migration service slugifies
+     * application names, so the two naming schemes stay comparable, and the
+     * literal dots remain unambiguous separators because a slug cannot contain
+     * one.
+     */
+    public String consumerUsername(String wso2Tenant, String userName) {
+        StringBuilder name = new StringBuilder();
+        String prefix = properties.getKong().getConsumerUsernamePrefix();
+        if (StringUtils.hasText(prefix)) {
+            name.append(slug(prefix)).append('.');
+        }
+        if (StringUtils.hasText(wso2Tenant)) {
+            name.append(slug(wso2Tenant)).append('.');
+        }
+        return name.append(slug(userName)).toString();
+    }
+
+    /**
+     * Builds the stable external key Kong stores in custom_id.
+     *
+     * <p>Uses the raw tenant and username so the value stays a faithful pointer
+     * back to WSO2. This must never be derived from something like an email
+     * address: Kong requires custom_id to be unique, and two WSO2 users sharing
+     * a mailbox would collide, leaving the second user unmigrated.
+     */
+    private String consumerCustomId(String wso2Tenant, String userName) {
+        return "wso2:user:" + (StringUtils.hasText(wso2Tenant) ? wso2Tenant : "unknown") + ":" + userName;
     }
 
     /**
@@ -198,12 +241,31 @@ public class KongAdminClient {
     /**
      * Tags every consumer so a later decK sync can select these entities,
      * matching the migration service convention.
+     *
+     * <p>{@code principal-type} is what lets anyone tell a migrated person from
+     * a migrated application once both share the control plane consumer list.
      */
-    private List<String> consumerTags(String userName) {
+    private List<String> consumerTags(String wso2Tenant, String userName) {
         List<String> tags = new ArrayList<>();
         tags.add(properties.getKong().getMigratedByTag());
+        tags.add(properties.getKong().getPrincipalTypeTag());
         tags.add(properties.getKong().getSourceUserTagPrefix() + ":" + userName);
+        if (StringUtils.hasText(wso2Tenant)) {
+            tags.add(properties.getKong().getTenantTagPrefix() + ":" + wso2Tenant);
+        }
         return tags;
+    }
+
+    /**
+     * Lowercases and reduces to alphanumerics joined by hyphens, matching the
+     * migration service slug rules for application names.
+     */
+    private static String slug(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "unknown";
+        }
+        String slug = value.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-|-$)", "");
+        return slug.isEmpty() ? "unknown" : slug;
     }
 
     private String consumersEndpoint(KonnectCredentials creds) {

@@ -125,7 +125,7 @@ class Wso2KongUserMigrationServiceTest {
 
         assertEquals(2, response.getTotalRequested());
         verify(kongAdminClient, org.mockito.Mockito.times(1))
-                .ensureConsumer(any(), eq("api.developer"), any());
+                .ensureConsumer(any(), eq("carbon.super"), eq("api.developer"));
         verify(kongAdminClient, org.mockito.Mockito.times(2)).assignGroup(any(), any(), any());
     }
 
@@ -202,14 +202,15 @@ class Wso2KongUserMigrationServiceTest {
     }
 
     @Test
-    void migrateUsers_fallsBackToUsernameWhenKongReturnsNoId() {
+    void migrateUsers_fallsBackToNamespacedUsernameWhenKongReturnsNoId() {
         stubConsumer(KongAdminClient.WriteOutcome.ALREADY_EXISTS, null);
         when(kongAdminClient.assignGroup(any(), any(), any()))
                 .thenReturn(KongAdminClient.WriteOutcome.CREATED);
 
         service.migrateUsers(request(role("Internal/subscriber", "kong-subscriber")));
 
-        verify(kongAdminClient).assignGroup(eq(CREDENTIALS), eq("api.developer"), eq("kong-subscriber"));
+        verify(kongAdminClient).assignGroup(
+                eq(CREDENTIALS), eq("user.carbon-super.api-developer"), eq("kong-subscriber"));
     }
 
     @Test
@@ -234,7 +235,7 @@ class Wso2KongUserMigrationServiceTest {
         when(kongAdminClient.ensureConsumer(any(), any(), any()))
                 .thenReturn(KongAdminClient.ConsumerRef.builder()
                         .id(id)
-                        .username("api.developer")
+                        .username("user.carbon-super.api-developer")
                         .outcome(outcome)
                         .build());
     }

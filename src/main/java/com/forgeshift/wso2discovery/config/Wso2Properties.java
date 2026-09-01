@@ -126,5 +126,24 @@ public class Wso2Properties {
         private String migratedByTag = "migrated-by:forgeshift-wso2-migrator";
         /** Prefix for the tag recording which WSO2 user a consumer came from. */
         private String sourceUserTagPrefix = "wso2-source-user";
+        /** Prefix for the tag recording the WSO2 tenant a consumer came from. */
+        private String tenantTagPrefix = "wso2-tenant";
+        /**
+         * Marks a consumer as a person rather than an application. A control
+         * plane holds one flat consumer list, so without this nothing tells the
+         * two apart once they share it.
+         */
+        private String principalTypeTag = "principal-type:user";
+        /**
+         * Leading segment of a migrated user's consumer username, keeping users
+         * out of the namespace the migration service uses for WSO2
+         * applications. Set blank to drop the segment.
+         *
+         * <p>Applications are deliberately <b>not</b> renamed to match: they are
+         * already in Kong, and renaming them would make decK treat them as new
+         * entities and prune the originals. The decK cutover, which rebuilds
+         * those entities anyway, is the moment to converge the two schemes.
+         */
+        private String consumerUsernamePrefix = "user";
     }
 }

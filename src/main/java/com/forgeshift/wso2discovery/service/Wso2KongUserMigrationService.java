@@ -134,7 +134,7 @@ public class Wso2KongUserMigrationService {
                                                        KonnectCredentials credentials) {
         List<Wso2UserMigrationResult> results = new ArrayList<>();
         for (Wso2UserMigrationUserRequest user : request.getUsers()) {
-            results.addAll(processUser(user, credentials));
+            results.addAll(processUser(user, request.getWso2Tenant(), credentials));
         }
         return results;
     }
@@ -149,10 +149,11 @@ public class Wso2KongUserMigrationService {
      * response counts and the history collection are keyed on.
      */
     private List<Wso2UserMigrationResult> processUser(Wso2UserMigrationUserRequest user,
+                                                      String wso2Tenant,
                                                       KonnectCredentials credentials) {
         KongAdminClient.ConsumerRef consumer;
         try {
-            consumer = kongAdminClient.ensureConsumer(credentials, user.getUserName(), user.getUserEmail());
+            consumer = kongAdminClient.ensureConsumer(credentials, wso2Tenant, user.getUserName());
         } catch (RuntimeException ex) {
             // The consumer is a prerequisite for every ACL, so a failure here
             // fails all rows for that user instead of half-applying them.
@@ -161,8 +162,10 @@ public class Wso2KongUserMigrationService {
 
         String migrationStatus = consumer.getOutcome() == KongAdminClient.WriteOutcome.CREATED
                 ? STATUS_SUCCESS : STATUS_ALREADY_EXISTS;
-        // Prefer the uuid when Kong returned one; the username also resolves.
-        String consumerRef = StringUtils.hasText(consumer.getId()) ? consumer.getId() : user.getUserName();
+        // Prefer the uuid when Kong returned one, else the namespaced username
+        // the client actually created - never the raw WSO2 name, which is not
+        // what the consumer is called in Kong.
+        String consumerRef = StringUtils.hasText(consumer.getId()) ? consumer.getId() : consumer.getUsername();
 
         if (user.getRoles() == null || user.getRoles().isEmpty()) {
             return List.of(buildResult(user, null, migrationStatus, STATUS_SKIPPED, NO_ROLES_REASON));
