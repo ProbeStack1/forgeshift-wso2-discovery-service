@@ -430,6 +430,12 @@ public class Wso2UserProfileDiscoveryService {
                 .displayName(document.getDisplayName())
                 .primaryEmail(document.getPrimaryEmail())
                 .emails(document.getEmails())
+                // Stored on the document and declared on the DTO, but never
+                // mapped: every discovered user therefore reached callers with a
+                // null `active`, and a UI showing whether an account is enabled
+                // could only ever print "not stated" against all of them.
+                .active(document.getActive())
+                .userType(document.getUserType())
                 .roles(toRoleDetails(document.getRoles(), document.getRolePermissions()))
                 .build();
     }
