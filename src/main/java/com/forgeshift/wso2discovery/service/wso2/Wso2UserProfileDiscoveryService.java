@@ -10,6 +10,7 @@ import com.forgeshift.wso2discovery.dto.Wso2RolePermissionDetail;
 import com.forgeshift.wso2discovery.dto.Wso2UserProfileDetail;
 import com.forgeshift.wso2discovery.dto.Wso2UserProfileDiscoveryRequest;
 import com.forgeshift.wso2discovery.dto.Wso2UserProfileDiscoveryResponse;
+import com.forgeshift.wso2discovery.dto.Wso2UserProfileHistoryResponse;
 import com.forgeshift.wso2discovery.repository.Wso2UserProfileRepository;
 import com.forgeshift.wso2discovery.service.Wso2TenantProfileService;
 import lombok.RequiredArgsConstructor;
@@ -340,6 +341,52 @@ public class Wso2UserProfileDiscoveryService {
     /**
      * Builds an Apigee-style migration discovery response for UI consumption.
      */
+    /**
+     * Past discovery runs for one tenant, newest first.
+     */
+    public Wso2UserProfileHistoryResponse history(String companyName, String wso2Tenant, int limit) {
+        List<Wso2UserProfileRepository.Wso2UserProfileRun> runs =
+                repository.listRuns(companyName, wso2Tenant, limit);
+
+        return Wso2UserProfileHistoryResponse.builder()
+                .companyName(companyName)
+                .wso2Tenant(wso2Tenant)
+                .totalRuns(runs.size())
+                .runs(runs.stream()
+                        .map(run -> Wso2UserProfileHistoryResponse.Wso2UserProfileRunSummary.builder()
+                                .requestTransactionId(run.getRequestTransactionId())
+                                .discoveredAt(run.getDiscoveredAt())
+                                .totalUsers(run.getTotalUsers())
+                                .totalRoles(run.getTotalRoles())
+                                .build())
+                        .collect(Collectors.toList()))
+                .build();
+    }
+
+    /**
+     * The users captured by one past run, in the same shape a live run returns.
+     *
+     * <p>Deliberately the same response type: a screen that can show a fresh
+     * discovery can then show a stored one without knowing which it is holding,
+     * and the two cannot drift apart in what they report.
+     */
+    public Wso2UserProfileDiscoveryResponse runDetails(String companyName,
+                                                       String wso2Tenant,
+                                                       String requestTransactionId) {
+        List<Wso2UserProfileDocument> documents =
+                repository.findByTransaction(companyName, wso2Tenant, requestTransactionId);
+
+        return Wso2UserProfileDiscoveryResponse.builder()
+                .companyName(companyName)
+                .orgName(wso2Tenant)
+                .requestTransactionId(requestTransactionId)
+                .discoveryStatus(STATUS_COMPLETED)
+                .totalUsers(documents.size())
+                .totalRoles(totalUniqueRoles(documents))
+                .users(documents.stream().map(this::toDetail).collect(Collectors.toList()))
+                .build();
+    }
+
     private Wso2UserProfileDiscoveryResponse buildResponse(Wso2UserProfileDiscoveryRequest request,
                                                            List<Wso2UserProfileDocument> documents) {
         return Wso2UserProfileDiscoveryResponse.builder()
